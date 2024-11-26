@@ -1,0 +1,11 @@
+
+tensorflow
+numpy
+matplotlib
+seaborn
+pandas
+scikit-learn
+librosa
+pygame
+pillow
+ttkbootstrap
