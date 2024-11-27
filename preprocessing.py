@@ -1,16 +1,59 @@
+import json
 import os
 import librosa
 import librosa.display
 import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image
-import io
 import os
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np
-from analysis import save_figure_to_list  # Importe a função para salvar imagens
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.utils import to_categorical # type: ignore
+from analysis import save_figure_to_list
+from utils import config, validate_path  # Importe a função para salvar imagens
+
+def load_dataset():
+    # Validate paths
+    data_path = validate_path(config["data_path"])
+    metadata_path = validate_path(config["metadata_path"])
+
+    # Load metadata
+    metadata = pd.read_csv(metadata_path)
+
+    # Load and process audio files
+    print("Loading and processing audio files...")
+    X, y = load_audio_files(data_path, metadata)
+
+    # Split data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=config["test_size"], random_state=config["random_state"])
+
+    # Prepare labels
+    y_train = to_categorical(y_train, num_classes=config["num_classes"])
+    y_test = to_categorical(y_test, num_classes=config["num_classes"])
+
+    # Reshape data for model input
+    X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
+    X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
+
+    # Plot spectrograms
+    print("Plotting spectrograms...")
+    plot_spectrograms_per_class_from_files(data_path, metadata, [f"Class {i}" for i in range(config["num_classes"])])
+
+    return X_train, y_train, X_test, y_test
+
+def load_class_names(file_path="classes.json"):
+    """
+    Carrega as classes a partir de um arquivo JSON.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            class_names = json.load(file)
+        return {int(k): v for k, v in class_names.items()}  # Converte as chaves para inteiros
+    except Exception as e:
+        raise ValueError(f"Error loading class names: {e}")
 
 # Process a single audio file and extract MFCC features
 def process_single_audio(file_path, class_label, n_mfcc=20):

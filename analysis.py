@@ -1,3 +1,4 @@
+import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve, auc
@@ -5,6 +6,9 @@ import numpy as np
 from itertools import cycle
 from tensorflow.keras.utils import to_categorical # type: ignore
 from PIL import Image
+
+from training import load_training_data
+from utils import config, display_images
 
 # Lista para armazenar imagens geradas
 image_list = []
@@ -147,3 +151,67 @@ def plot_image_models(image_path):
     save_figure_to_list()  # Salva a imagem do gráfico
     plt.close()  # Fecha o gráfico
 
+def do_all_analysis(resnet_model, lstm_model, transformer_model, X_test, y_test):
+
+    print("Displaying generated plots...")
+    start_classification_resnet = time.time()
+    y_pred_resnet = resnet_model.predict(X_test).argmax(axis=1)
+    classification_time_resnet = time.time() - start_classification_resnet
+
+    start_classification_lstm = time.time()
+    y_pred_lstm = lstm_model.predict(X_test).argmax(axis=1)
+    classification_time_lstm = time.time() - start_classification_lstm
+
+    start_classification_transformer = time.time()
+    y_pred_transformer = transformer_model.predict(X_test).argmax(axis=1)
+    classification_time_transformer = time.time() - start_classification_transformer
+
+    # Evaluate models
+    print("Evaluating models...")
+
+    # Exemplo de uso
+    plot_image_models("models.png")
+
+    y_true = y_test.argmax(axis=1)
+    report_resnet, auc_resnet = evaluate_model_performance(y_true, y_pred_resnet, [f"Class {i}" for i in range(config["num_classes"])])
+    report_lstm, auc_lstm = evaluate_model_performance(y_true, y_pred_lstm, [f"Class {i}" for i in range(config["num_classes"])])
+    report_transformer, auc_transformer = evaluate_model_performance(y_true, y_pred_transformer, [f"Class {i}" for i in range(config["num_classes"])])
+
+    plot_metrics_comparison(
+        report_resnet, 
+        report_lstm, 
+        report_transformer, 
+        auc_resnet, 
+        auc_lstm, 
+        auc_transformer, 
+        [f"Class {i}" for i in range(config["num_classes"])]
+    )
+
+    # Plot confusion matrices
+    print("Plotting confusion matrices...")
+    plot_confusion_matrix(y_true, y_pred_resnet, [f"Class {i}" for i in range(config["num_classes"])], "ResNet")
+    plot_confusion_matrix(y_true, y_pred_lstm, [f"Class {i}" for i in range(config["num_classes"])], "LSTM")
+    plot_confusion_matrix(y_true, y_pred_transformer, [f"Class {i}" for i in range(config["num_classes"])], "Transformer")
+    
+    # Plot ROC curves
+    print("Plotting ROC curves...")
+    plot_multiclass_roc(y_true, y_pred_resnet, [f"Class {i}" for i in range(config["num_classes"])], "ResNet")
+    plot_multiclass_roc(y_true, y_pred_lstm, [f"Class {i}" for i in range(config["num_classes"])], "LSTM")
+    plot_multiclass_roc(y_true, y_pred_transformer, [f"Class {i}" for i in range(config["num_classes"])], "Transformer")
+
+    # Plot accuracy and time comparison
+    print("Generating accuracy and time comparison plot...")
+    training_times, history_resnet, history_lstm, history_transformer, training_params = load_training_data()
+    plot_comparison(
+        training_times.get("resnet", 0),  # Usando o tempo do dicionário
+        training_times.get("lstm", 0),    # Usando o tempo do dicionário
+        training_times.get("transformer", 0),  # Usando o tempo do dicionário  # Adicione o tempo de treinamento do Transformer
+        classification_time_resnet, 
+        classification_time_lstm, 
+        classification_time_transformer,  # Adicione o tempo de classificação do Transformer
+        history_resnet = history_resnet, 
+        history_lstm = history_lstm, 
+        history_transformer = history_transformer # Adicione a precisão do Transformer
+    )
+    
+    display_images(image_list)
