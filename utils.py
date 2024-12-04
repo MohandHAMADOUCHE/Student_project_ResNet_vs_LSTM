@@ -4,14 +4,38 @@ import os
 from matplotlib import pyplot as plt
 
 
+# Configurações gerais e hiperparâmetros
 config = {
-    "data_path": r"C:\Users\Gustavo\Desktop\UrbanSound8K\audio",
-    "metadata_path": r"C:\Users\Gustavo\Desktop\UrbanSound8K\metadata\UrbanSound8K.csv",
+    "data_path": r"C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\Revisão Literaria\UrbanSound8K\UrbanSound8K\audio",
+    "metadata_path": r"C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\Revisão Literaria\UrbanSound8K\UrbanSound8K\metadata\UrbanSound8K.csv",
     "epochs": 20,
     "batch_size": 32,
     "test_size": 0.2,
     "random_state": 42,
     "num_classes": 10,
+    "learning_rate": 0.001,
+    "dense_units": 128,
+    "dropout_rate": 0.3,
+    # LSTM-specific
+    "lstm_units": 64,
+    "lstm_dropout": 0.2,
+    # ResNet-specific
+    "resnet_filters": 32,
+    "resnet_kernel_size": 3,
+    "resnet_blocks": 3,
+    # Transformer-specific
+    "transformer_heads": 4,
+    "transformer_ff_dim": 128,
+    "transformer_layers": 2,
+    "transformer_epsilon": 1e-6,
+    # Preprocessing activations
+    "preprocessing_methods": {
+        "MFCC": False,
+        "GFCC": False,
+        "STFT": False,
+        "LOFAR": False,
+        "DEMON": False,
+    }
 }
 
 model_paths = {

@@ -1,70 +1,112 @@
 import json
 import time
-from utils import config
-from tensorflow.keras import layers, models # type: ignore
-from tensorflow.keras.models import load_model # type: ignore
-from tensorflow.keras.callbacks import History # type: ignore
 
-# Build an LSTM model for classification
-def build_lstm_model(input_shape, num_classes):
-    model = models.Sequential()
-    model.add(layers.Input(shape=input_shape))  # Adiciona explicitamente a camada Input
-    model.add(layers.LSTM(64, return_sequences=True))
-    model.add(layers.LSTM(64))
-    model.add(layers.Dense(128, activation='relu'))
-    model.add(layers.Dense(num_classes, activation='softmax'))
+import tensorflow as tf
+from utils import config
+from tensorflow.keras import layers, models, optimizers, regularizers, callbacks  # type: ignore
+from tensorflow.keras.models import load_model  # type: ignore
+from tensorflow.keras.callbacks import History  # type: ignore
+# Function to build an LSTM model
+def build_lstm_model(input_shape, config):
+    model = models.Sequential([
+        # Input layer to define the shape of the input
+        layers.Input(shape=input_shape),
+        # First LSTM layer with sequence output and dropout
+        layers.LSTM(config["lstm_units"], return_sequences=True, dropout=config["lstm_dropout"]),
+        # Second LSTM layer without sequence output
+        layers.LSTM(config["lstm_units"], dropout=config["lstm_dropout"]),
+        # Dense layer to extract features
+        layers.Dense(config["dense_units"], activation='relu'),
+        # Dropout layer for regularization
+        layers.Dropout(config["dropout_rate"]),
+        # Output layer for multi-class classification
+        layers.Dense(config["num_classes"], activation='softmax')
+    ])
+    # Compile the model with Adam optimizer and categorical cross-entropy loss
+    model.compile(optimizer=optimizers.Adam(learning_rate=config["learning_rate"]),
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
     return model
 
-# Build a ResNet model for classification
-def build_resnet_model(input_shape, num_classes):
+# Function to build a ResNet model
+def build_resnet_model(input_shape, config):
+    # Input layer
     inputs = layers.Input(shape=input_shape)
-    x = layers.Conv1D(64, kernel_size=7, strides=2, padding='same')(inputs)
+    # Initial convolution, batch normalization, activation, and pooling
+    x = layers.Conv1D(config["resnet_filters"], kernel_size=7, strides=2, padding='same')(inputs)
     x = layers.BatchNormalization()(x)
     x = layers.ReLU()(x)
     x = layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(x)
-    
-    for _ in range(3):
-        shortcut = x
-        x = layers.Conv1D(64, kernel_size=3, padding='same')(x)
+
+    # Residual blocks with skip connections
+    for _ in range(config["resnet_blocks"]):
+        shortcut = x  # Preserve the input for the skip connection
+        x = layers.Conv1D(config["resnet_filters"], kernel_size=config["resnet_kernel_size"], padding='same', activation='relu')(x)
         x = layers.BatchNormalization()(x)
-        x = layers.ReLU()(x)
-        x = layers.Conv1D(64, kernel_size=3, padding='same')(x)
+        x = layers.Conv1D(config["resnet_filters"], kernel_size=config["resnet_kernel_size"], padding='same')(x)
         x = layers.BatchNormalization()(x)
+        # Adjust dimensions of the shortcut if needed
         if shortcut.shape[-1] != x.shape[-1]:
-            shortcut = layers.Conv1D(64, kernel_size=1, padding='same')(shortcut)
+            shortcut = layers.Conv1D(config["resnet_filters"], kernel_size=1, padding='same')(shortcut)
+        # Add the skip connection
         x = layers.add([x, shortcut])
         x = layers.ReLU()(x)
-    
-    x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dense(128, activation='relu')(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
-    return models.Model(inputs=inputs, outputs=outputs)
 
-# Build a Transformer model for classification
-def build_transformer_model(input_shape, num_classes, num_heads=4, ff_dim=128, num_layers=2):
+    # Global average pooling to summarize features
+    x = layers.GlobalAveragePooling1D()(x)
+    # Fully connected layer for feature extraction
+    x = layers.Dense(config["dense_units"], activation='relu')(x)
+    # Dropout layer to prevent overfitting
+    x = layers.Dropout(config["dropout_rate"])(x)
+    # Output layer for classification
+    outputs = layers.Dense(config["num_classes"], activation='softmax')(x)
+
+    # Compile the model
+    model = models.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer=optimizers.Adam(learning_rate=config["learning_rate"]),
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return model
+
+
+# Function to build a Transformer model
+def build_transformer_model(input_shape, config):
+    # Input layer
     inputs = layers.Input(shape=input_shape)
+    # Dense layer for embedding
+    x = layers.Dense(config["transformer_ff_dim"], activation='relu')(inputs)
 
-    # Embed the input
-    x = layers.Dense(ff_dim, activation='relu')(inputs)
-    
-    for _ in range(num_layers):
-        # Multi-head attention block
-        attention_output = layers.MultiHeadAttention(num_heads=num_heads, key_dim=ff_dim)(x, x)
-        attention_output = layers.LayerNormalization(epsilon=1e-6)(attention_output + x)
-        
-        # Feed-forward block
-        ffn_output = layers.Dense(ff_dim, activation='relu')(attention_output)
-        ffn_output = layers.Dense(ff_dim)(ffn_output)
-        x = layers.LayerNormalization(epsilon=1e-6)(ffn_output + attention_output)
-    
-    # Global pooling and classification layers
+    # Transformer encoder layers
+    for _ in range(config["transformer_layers"]):
+        # Multi-head attention layer
+        attention_output = layers.MultiHeadAttention(
+            num_heads=config["transformer_heads"],
+            key_dim=config["transformer_ff_dim"] // config["transformer_heads"]
+        )(x, x)
+        # Add and normalize for stability
+        attention_output = layers.LayerNormalization(epsilon=config["transformer_epsilon"])(attention_output + x)
+        # Feed-forward network with residual connection
+        ffn_output = layers.Dense(config["transformer_ff_dim"], activation='relu')(attention_output)
+        ffn_output = layers.Dense(config["transformer_ff_dim"])(ffn_output)
+        x = layers.LayerNormalization(epsilon=config["transformer_epsilon"])(ffn_output + attention_output)
+
+    # Pooling layers for fixed-size output
     x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dense(128, activation='relu')(x)
-    outputs = layers.Dense(num_classes, activation='softmax')(x)
+    # Fully connected layer for feature extraction
+    x = layers.Dense(config["dense_units"], activation='relu')(x)
+    # Dropout layer for regularization
+    x = layers.Dropout(config["dropout_rate"])(x)
+    # Output layer for classification
+    outputs = layers.Dense(config["num_classes"], activation='softmax')(x)
 
-    return models.Model(inputs=inputs, outputs=outputs)
+    # Compile the model
+    model = models.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer=optimizers.Adam(learning_rate=config["learning_rate"]),
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return model
 
-# Após carregar o modelo, recompilá-lo
+# Função para carregar e compilar um modelo
 def load_and_compile_model(model_path):
     model = load_model(model_path)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
@@ -75,25 +117,21 @@ def save_model(model, file_path):
     model.save(file_path)
     print(f"Model saved to {file_path}")
 
-def save_training_data(training_times, history_resnet=None, history_lstm=None, history_transformer=None, training_params=None, filename="training_times.json"):
-    """
-    Salva os tempos de treinamento, o histórico dos modelos e os parâmetros de treinamento no arquivo JSON.
-    """
+# Função para salvar os tempos de treinamento e os históricos dos modelos
+def save_training_data(training_times, history_dict, training_params, filename="training_times.json"):
     try:
         data_to_save = {
             "training_params": training_params,
             "training_times": training_times,
-            "history_resnet": history_resnet.history if history_resnet else None,  # Salva o histórico como dicionário
-            "history_lstm": history_lstm.history if history_lstm else None,
-            "history_transformer": history_transformer.history if history_transformer else None
+            "history_dict": history_dict
         }
-
         with open(filename, 'w') as file:
             json.dump(data_to_save, file, indent=4)
-        print(f"Training times, history, and params saved to {filename}")
+        print(f"Training data saved to {filename}")
     except Exception as e:
-        print(f"Error saving training times: {e}")
+        print(f"Error saving training data: {e}")
 
+# Função para converter um dicionário para histórico
 def dict_to_history(history_dict):
     if not history_dict:
         return None
@@ -101,33 +139,45 @@ def dict_to_history(history_dict):
     history.history = history_dict
     return history
 
+# Função para carregar os dados de treinamento
 def load_training_data(filename="training_times.json"):
-    """
-    Carrega os tempos de treinamento, histórico e parâmetros de um arquivo JSON.
-    """
     try:
         with open(filename, 'r') as file:
             data = json.load(file)
             training_times = data.get("training_times", {})
-            history_resnet = dict_to_history(data.get("history_resnet", {}))
-            history_lstm = dict_to_history(data.get("history_lstm", {}))
-            history_transformer = dict_to_history(data.get("history_transformer", {}))
+            history_dict = data.get("history_dict", {})
             training_params = data.get("training_params", {})
         print("Training data loaded successfully!")
-        return training_times, history_resnet, history_lstm, history_transformer, training_params
+        return training_times, history_dict, training_params
     except Exception as e:
         print(f"Error loading training data: {e}")
-        return {}, None, None, None, {}
+        return {}, {}, {}
 
+# Função para treinar o modelo
+def train_model(model_name, X_train, y_train, X_test, y_test, config):
+    print(f"Training {model_name}...")
+    start_time = time.time()
+    
+    if model_name == 'resnet':
+        model = build_resnet_model((X_train.shape[1], 1), config)
+    elif model_name == 'lstm':
+        model = build_lstm_model((X_train.shape[1], 1), config)
+    elif model_name == 'transformer':
+        model = build_transformer_model((X_train.shape[1], 1), config)
+    
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    history = model.fit(X_train, y_train, epochs=config["epochs"], batch_size=config["batch_size"], validation_data=(X_test, y_test))
+    
+    training_time = time.time() - start_time
+    save_model(model, f"{model_name}_model.keras")
+    
+    return history, training_time
+
+# Função principal para treinar os modelos selecionados
 def training_models(X_train, y_train, X_test, y_test):
-
-    # Armazenar tempos de treinamento
     training_times = {}
+    history_dict = {}
 
-    # Armazenar tempos de treinamento
-    history_resnet, history_lstm, history_transformer = None, None, None
-
-    # Parâmetros de treinamento
     training_params = {
         "epochs": config["epochs"],
         "batch_size": config["batch_size"],
@@ -136,37 +186,11 @@ def training_models(X_train, y_train, X_test, y_test):
         "num_classes": config["num_classes"]
     }
 
-    # Treinamento dos modelos, salvando os tempos
-    print("Training ResNet...")
-    start_time_resnet = time.time()
-    resnet_model = build_resnet_model((X_train.shape[1], 1), config["num_classes"])
-    resnet_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    history_resnet = resnet_model.fit(X_train, y_train, epochs=config["epochs"], batch_size=config["batch_size"], validation_data=(X_test, y_test))
-    training_times["resnet"] = time.time() - start_time_resnet
+    # Modelos selecionados no arquivo de configuração
+    for model_name in config["selected_models"]:
+        history, training_time = train_model(model_name, X_train, y_train, X_test, y_test, config)
+        history_dict[model_name] = history.history
+        training_times[model_name] = training_time
 
-    # Train and evaluate LSTM
-    print("Training LSTM...")
-    start_time_lstm = time.time()
-    lstm_model = build_lstm_model((X_train.shape[1], 1), config["num_classes"])
-    lstm_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    history_lstm = lstm_model.fit(X_train, y_train, epochs=config["epochs"], batch_size=config["batch_size"], validation_data=(X_test, y_test))
-    training_times["lstm"] = time.time() - start_time_lstm
-
-    # Train and evaluate Transformer
-    print("Training Transformer...")
-    start_time_transformer = time.time()
-    transformer_model = build_transformer_model((X_train.shape[1], 1), config["num_classes"])
-    transformer_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    history_transformer = transformer_model.fit(X_train, y_train, epochs=config["epochs"], batch_size=config["batch_size"], validation_data=(X_test, y_test))
-    training_times["transformer"] = time.time() - start_time_transformer
-
-    # Salvar os modelos
-    # Salvar os modelos usando o formato .keras
-    save_model(resnet_model, "resnet_model.keras")
-    save_model(lstm_model, "lstm_model.keras")
-    save_model(transformer_model, "transformer_model.keras")
-
+    save_training_data(training_times, history_dict, training_params)
     print("Models trained and saved successfully!")
-
-    # Salvar os tempos de treinamento em um arquivo JSON
-    save_training_data(training_times, history_resnet, history_lstm, history_transformer, training_params)
