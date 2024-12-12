@@ -64,21 +64,23 @@ def load_audio_and_classify(class_names_file="classes.json"):
     except Exception as e:
         messagebox.showerror("Error", f"Error classifying the audio file: {e}")
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-
 def update_config(config, validate_path, root_style):
-    """Janela para atualizar a configuração com layout em três colunas e barra de rolagem."""
+    """Janela para atualizar a configuração com layout em abas."""
     def save_changes():
         try:
+            # Atualiza valores gerais
             for key, var in vars_dict.items():
-                value = var.get()
-                if isinstance(config[key], int):
-                    config[key] = int(value)
-                elif isinstance(config[key], float):
-                    config[key] = float(value)
-                elif isinstance(config[key], str):
-                    config[key] = validate_path(value)
+                if key == "preprocessing_methods":  # Lidando com métodos de pré-processamento
+                    for subkey, subvar in vars_dict[key].items():
+                        config[key][subkey] = subvar.get() == "1"
+                else:
+                    value = var.get()
+                    if isinstance(config[key], int):
+                        config[key] = int(value)
+                    elif isinstance(config[key], float):
+                        config[key] = float(value)
+                    elif isinstance(config[key], str):
+                        config[key] = validate_path(value)
             messagebox.showinfo("Success", "Configuration updated successfully!")
             config_window.destroy()
         except Exception as e:
@@ -91,62 +93,94 @@ def update_config(config, validate_path, root_style):
 
     config_window = tk.Toplevel()
     config_window.title("Configuration Panel")
-    config_window.geometry("700x500")  # Ajuste para caber os parâmetros
+    config_window.geometry("800x600")
     config_window.configure(bg=root_style.colors.primary)
 
     header = ttk.Label(config_window, text="Update Configuration", font=("Helvetica", 16, "bold"))
     header.pack(pady=10)
 
-    # Frame com barra de rolagem
-    canvas = tk.Canvas(config_window)
-    scroll_y = tk.Scrollbar(config_window, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=scroll_y.set)
-
-    # Frame interno que vai conter os parâmetros
-    form_frame = ttk.Frame(canvas, padding=20)
-
-    # Adicionando barra de rolagem
-    scroll_y.pack(side="right", fill="y")
-    canvas.pack(fill="both", expand=True)
-    canvas.create_window((0, 0), window=form_frame, anchor="nw")
-    form_frame.bind(
-        "<Configure>", 
-        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
+    # Criar o notebook para dividir em abas
+    notebook = ttk.Notebook(config_window)
+    notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
     vars_dict = {}
+
+    # Aba de configurações gerais
+    general_frame = ttk.Frame(notebook, padding=10)
+    notebook.add(general_frame, text="General Settings")
+
     row = 0
+    for key, value in config.items():
+        # Ignorar configurações específicas de modelos ou dicionários
+        if key in [
+            "lstm_units", "lstm_dropout",
+            "resnet_filters", "resnet_kernel_size", "resnet_blocks",
+            "transformer_heads", "transformer_ff_dim", "transformer_layers", "transformer_epsilon"
+        ] or isinstance(value, dict):
+            continue
+        label = ttk.Label(general_frame, text=key.replace("_", " ").title(), font=("Helvetica", 12))
+        label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
 
-    for i, (key, value) in enumerate(config.items()):
-        if key in ["data_path", "metadata_path"]:
-            # Para os caminhos, usar linha completa
-            label = key.replace("_", " ").title()
-            ttk.Label(form_frame, text=label, font=("Helvetica", 12)).grid(row=row, column=0, padx=10, pady=10, sticky="w", columnspan=3)
+        vars_dict[key] = tk.StringVar(value=value)
+        entry = ttk.Entry(general_frame, textvariable=vars_dict[key], width=40)
+        entry.grid(row=row, column=1, padx=10, pady=5)
+
+        if key.endswith("_path"):
+            browse_btn = ttk.Button(general_frame, text="Browse", command=lambda var=vars_dict[key]: browse_file(var))
+            browse_btn.grid(row=row, column=2, padx=5)
+
+        row += 1
+
+    # Abas específicas para os modelos
+    for model, settings in {
+        "LSTM Settings": {
+            "lstm_units": config["lstm_units"],
+            "lstm_dropout": config["lstm_dropout"],
+        },
+        "ResNet Settings": {
+            "resnet_filters": config["resnet_filters"],
+            "resnet_kernel_size": config["resnet_kernel_size"],
+            "resnet_blocks": config["resnet_blocks"],
+        },
+        "Transformer Settings": {
+            "transformer_heads": config["transformer_heads"],
+            "transformer_ff_dim": config["transformer_ff_dim"],
+            "transformer_layers": config["transformer_layers"],
+            "transformer_epsilon": config["transformer_epsilon"],
+        },
+    }.items():
+        model_frame = ttk.Frame(notebook, padding=10)
+        notebook.add(model_frame, text=model)
+
+        row = 0
+        for key, value in settings.items():
+            label = ttk.Label(model_frame, text=key.replace("_", " ").title(), font=("Helvetica", 12))
+            label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
             vars_dict[key] = tk.StringVar(value=value)
-            entry = ttk.Entry(form_frame, textvariable=vars_dict[key], width=60)
-            entry.grid(row=row, column=1, padx=10, pady=10, columnspan=3)
-
-            browse_btn = ttk.Button(form_frame, text="Browse", command=lambda var=vars_dict[key]: browse_file(var))
-            browse_btn.grid(row=row, column=4, padx=5)
+            entry = ttk.Entry(model_frame, textvariable=vars_dict[key], width=40)
+            entry.grid(row=row, column=1, padx=10, pady=5)
             row += 1
-        else:
-            # Para outros parâmetros, usar três colunas
-            col = (i - 2) % 3  # Alternar entre 0, 1 e 2
-            if col == 0 and i > 2:
-                row += 1  # Nova linha a cada três colunas
 
-            label = key.replace("_", " ").title()
-            ttk.Label(form_frame, text=label, font=("Helvetica", 12)).grid(row=row, column=col * 2, padx=10, pady=10, sticky="w")
-            vars_dict[key] = tk.StringVar(value=value)
-            entry = ttk.Entry(form_frame, textvariable=vars_dict[key], width=20)
-            entry.grid(row=row, column=col * 2 + 1, padx=10, pady=10)
+    # Aba de métodos de pré-processamento
+    preprocessing_frame = ttk.Frame(notebook, padding=10)
+    notebook.add(preprocessing_frame, text="Preprocessing Methods")
+
+    row = 0
+    vars_dict["preprocessing_methods"] = {}
+    for method, enabled in config["preprocessing_methods"].items():
+        label = ttk.Label(preprocessing_frame, text=method, font=("Helvetica", 12))
+        label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+
+        var = tk.StringVar(value="1" if enabled else "0")
+        checkbox = ttk.Checkbutton(preprocessing_frame, variable=var)
+        checkbox.grid(row=row, column=1, sticky="w", padx=10, pady=5)
+
+        vars_dict["preprocessing_methods"][method] = var
+        row += 1
 
     save_btn = ttk.Button(config_window, text="Save Changes", style="success.TButton", command=save_changes)
     save_btn.pack(fill="x", padx=20, pady=10)
-
-    # Ajustando as colunas do frame
-    for col in range(5):  # Considerando 5 colunas (1 para cada campo e 4 para botões)
-        form_frame.grid_columnconfigure(col, weight=1, uniform="equal")
 
 def select_models(callback):
     """

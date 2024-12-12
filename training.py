@@ -28,6 +28,94 @@ def build_lstm_model(input_shape, config):
                   metrics=['accuracy'])
     return model
 
+def build_resnet_model_deepship(input_shape):
+    # Entrada do modelo
+    inputs = layers.Input(shape=input_shape)
+
+    # Primeira convolução 7x7
+    x = layers.Conv1D(64, kernel_size=7, strides=2, padding='same')(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+
+    # Primeiro bloco de convoluções com 64 filtros
+    for _ in range(4):
+        shortcut = x
+        x = layers.Conv1D(64, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        x = layers.Conv1D(64, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.add([x, shortcut])
+        x = layers.ReLU()(x)
+
+    # Segunda camada com 128 filtros
+    shortcut = layers.Conv1D(128, kernel_size=1, strides=2, padding='same')(x)  # Ajuste para os canais
+    x = layers.Conv1D(128, kernel_size=3, strides=2, padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.add([x, shortcut])
+    x = layers.ReLU()(x)
+
+    # Blocos adicionais com 128 filtros
+    for _ in range(2):
+        shortcut = x
+        x = layers.Conv1D(128, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        x = layers.Conv1D(128, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.add([x, shortcut])
+        x = layers.ReLU()(x)
+
+    # Blocos com 256 filtros
+    shortcut = layers.Conv1D(256, kernel_size=1, strides=2, padding='same')(x)  # Ajuste para os canais
+    x = layers.Conv1D(256, kernel_size=3, strides=2, padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.add([x, shortcut])
+    x = layers.ReLU()(x)
+
+    # Blocos adicionais com 256 filtros
+    for _ in range(3):
+        shortcut = x
+        x = layers.Conv1D(256, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        x = layers.Conv1D(256, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.add([x, shortcut])
+        x = layers.ReLU()(x)
+
+    # Blocos com 512 filtros
+    shortcut = layers.Conv1D(512, kernel_size=1, strides=2, padding='same')(x)  # Ajuste para os canais
+    x = layers.Conv1D(512, kernel_size=3, strides=2, padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
+    x = layers.add([x, shortcut])
+    x = layers.ReLU()(x)
+
+    # Blocos adicionais com 512 filtros
+    for _ in range(3):
+        shortcut = x
+        x = layers.Conv1D(512, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+        x = layers.Conv1D(512, kernel_size=3, padding='same')(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.add([x, shortcut])
+        x = layers.ReLU()(x)
+
+    # Camada de pooling global e saída
+    x = layers.GlobalAveragePooling1D()(x)
+    outputs = layers.Dense(config["num_classes"], activation='softmax')(x)
+
+    # Compilar o modelo
+    model = models.Model(inputs=inputs, outputs=outputs)
+    model.compile(optimizer=optimizers.Adam(learning_rate=0.001),
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return model
+
 # Function to build a ResNet model
 def build_resnet_model(input_shape, config):
     # Input layer
@@ -159,7 +247,7 @@ def train_model(model_name, X_train, y_train, X_test, y_test, config):
     start_time = time.time()
     
     if model_name == 'resnet':
-        model = build_resnet_model((X_train.shape[1], 1), config)
+        model = build_resnet_model_deepship((X_train.shape[1], 1))
     elif model_name == 'lstm':
         model = build_lstm_model((X_train.shape[1], 1), config)
     elif model_name == 'transformer':

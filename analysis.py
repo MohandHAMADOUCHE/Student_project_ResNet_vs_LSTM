@@ -1,3 +1,5 @@
+import json
+import os
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -6,7 +8,10 @@ import numpy as np
 from itertools import cycle
 from tensorflow.keras.utils import to_categorical  # type: ignore
 from PIL import Image
-
+from datetime import datetime
+from fpdf import FPDF
+import shutil
+import pickle
 from training import load_and_compile_model, load_training_data
 from utils import config, display_images, model_paths
 
@@ -177,4 +182,114 @@ def do_all_analysis(X_test, y_test):
     training_times, histories, _ = load_training_data()
     plot_comparison(training_times, classification_times, histories)
     
+    save_analysis_results(reports, training_times, classification_times, auc_scores, image_list, model_paths, config)
+    
     display_images(image_list)
+
+
+# Função para criar o diretório
+def create_model_directory(base_dir="Models"):
+    timestamp = datetime.now().strftime("%Y%m%d%H%M")
+    path = os.path.join(base_dir, timestamp)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+# Função para copiar os modelos para o diretório da análise
+def copy_models_to_directory(model_paths, target_directory):
+    models_dir = os.path.join(target_directory, "models")
+    os.makedirs(models_dir, exist_ok=True)
+    for model_name, src_path in model_paths.items():
+        dest_path = os.path.join(models_dir, f"{model_name}.keras")
+        shutil.copy(src_path, dest_path)
+        print(f"Copied {src_path} to {dest_path}")
+
+# Função para gerar o relatório em PDF
+def generate_pdf_report(directory, model_reports, training_times, classification_times, auc_scores, images, config):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Adicionar página inicial com título
+    pdf.add_page()
+    pdf.set_font("Arial", size=14, style="B")
+    pdf.cell(200, 10, txt="Model Performance Report", ln=True, align="C")
+    pdf.ln(10)
+
+    # Adicionar dados de treinamento e classificação
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="Training and Classification Times", ln=True, align="L")
+    for model, time in training_times.items():
+        pdf.cell(200, 8, txt=f"Model: {model} | Training Time: {time:.2f}s | Classification Time: {classification_times.get(model, 0):.2f}s", ln=True)
+    pdf.ln(10)
+
+    # Adicionar pontuação AUC
+    pdf.cell(200, 10, txt="AUC Scores", ln=True, align="L")
+    for model, auc in auc_scores.items():
+        pdf.cell(200, 8, txt=f"Model: {model} | AUC Score: {auc:.2f}", ln=True)
+    pdf.ln(10)
+
+    # Adicionar relatórios detalhados de cada modelo
+    for model, report in model_reports.items():
+        pdf.add_page()
+        pdf.set_font("Arial", size=12, style="B")
+        pdf.cell(200, 10, txt=f"Model: {model}", ln=True)
+        pdf.set_font("Arial", size=10)
+        for class_name, metrics in report.items():
+            if isinstance(metrics, dict):  # Classes individuais
+                pdf.cell(200, 8, txt=f"Class: {class_name}", ln=True)
+                for metric, value in metrics.items():
+                    pdf.cell(200, 8, txt=f"  {metric}: {value:.2f}", ln=True)
+            else:  # Métricas gerais como 'accuracy'
+                pdf.cell(200, 8, txt=f"{class_name}: {metrics:.2f}", ln=True)
+        pdf.ln(5)
+
+    # Adicionar imagens geradas
+    for idx, img_array in enumerate(images):
+        pdf.add_page()
+        pdf.set_font("Arial", size=12, style="B")
+        pdf.cell(200, 10, txt=f"Figure {idx + 1}", ln=True)
+        image_path = os.path.join(directory, f"figure_{idx + 1}.png")
+        Image.fromarray(img_array).save(image_path)
+        pdf.image(image_path, x=10, y=30, w=180)
+        pdf.ln(85)  # Espaço para evitar sobreposição
+
+    # Adicionar configurações no PDF
+    pdf.add_page()
+    pdf.set_font("Arial", size=12, style="B")
+    pdf.cell(200, 10, txt="Configuration Settings", ln=True)
+    pdf.set_font("Arial", size=10)
+    for key, value in config.items():
+        if isinstance(value, dict):
+            pdf.cell(200, 8, txt=f"{key}: ", ln=True)
+            for sub_key, sub_value in value.items():
+                pdf.cell(200, 8, txt=f"  {sub_key}: {sub_value}", ln=True)
+        else:
+            pdf.cell(200, 8, txt=f"{key}: {value}", ln=True)
+    pdf.ln(5)
+
+    # Salvar o PDF
+    pdf_path = os.path.join(directory, "model_report.pdf")
+    pdf.output(pdf_path)
+    print(f"PDF report saved at: {pdf_path}")
+
+# Função principal para salvar os dados e relatório
+def save_analysis_results(model_reports, training_times, classification_times, auc_scores, images, model_paths, config, training_data_file="training_times.json"):
+    directory = create_model_directory()
+
+    # Copiar modelos para o diretório
+    copy_models_to_directory(model_paths, directory)
+
+    # Salvar arquivo training_times.json no diretório
+    with open(os.path.join(directory, "training_times.json"), "w") as json_file:
+        json.dump(training_times, json_file, indent=4)
+    
+    # Salvar os relatórios de modelos no subdiretório
+    models_dir = os.path.join(directory, "models")
+    for model_name, model in model_reports.items():
+        model_path = os.path.join(models_dir, f"{model_name}.pkl")
+        with open(model_path, "wb") as model_file:
+            pickle.dump(model, model_file)
+
+    # Gerar e salvar o relatório em PDF
+    generate_pdf_report(directory, model_reports, training_times, classification_times, auc_scores, images, config)
+
+    print(f"Results saved in directory: {directory}")
