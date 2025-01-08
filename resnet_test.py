@@ -1,60 +1,121 @@
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress warnings and informational logs
 import numpy as np
 import librosa
+import matplotlib.pyplot as plt
 from sklearn.neighbors import NeighborhoodComponentsAnalysis
 from sklearn.model_selection import train_test_split
 from tensorflow.keras import layers, models, optimizers
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
-# Função para preprocessar e fundir características
-def extract_features(file_path, max_length=100):
+# Função de pré-processamento com pré-ênfase, framing e windowing
+def preprocess_audio(file_path, frame_length=2048, hop_length=512, show_example=False):
     audio, sample_rate = librosa.load(file_path, sr=None)
 
-    # Extração de características individuais
-    mfcc = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=13)
-    gfcc = mfcc  # Substituir por implementação GFCC
-    cqt = np.abs(librosa.cqt(y=audio, sr=sample_rate, n_bins=84))
-    lofar = librosa.amplitude_to_db(np.abs(librosa.stft(audio)), ref=np.max)
+    # Pré-ênfase
+    pre_emphasis = 0.97
+    emphasized_audio = np.append(audio[0], audio[1:] - pre_emphasis * audio[:-1])
 
-    # Fusão das características
-    features = np.concatenate([mfcc, gfcc, cqt, lofar], axis=0)
+    # Divisão em frames e aplicação de janela Hamming
+    frames = librosa.util.frame(emphasized_audio, frame_length=frame_length, hop_length=hop_length).T
+    windowed_frames = frames * np.hamming(frame_length)
 
-    # Normalizar e ajustar tamanho
-    std = np.std(features, axis=1, keepdims=True)
-    std[std == 0] = 1e-8
-    features = (features - np.mean(features, axis=1, keepdims=True)) / std
+    # Visualização de exemplo
+    if show_example:
+        plt.figure(figsize=(12, 4))
+        plt.subplot(1, 2, 1)
+        plt.title("Áudio Original")
+        librosa.display.waveshow(audio, sr=sample_rate)
+        plt.subplot(1, 2, 2)
+        plt.title("Áudio com Pré-Ênfase")
+        librosa.display.waveshow(emphasized_audio, sr=sample_rate)
+        plt.tight_layout()
+        plt.show()
 
-    if features.shape[1] > max_length:
-        features = features[:, :max_length]
-    else:
-        features = np.pad(features, ((0, 0), (0, max_length - features.shape[1])), mode='constant')
+    return emphasized_audio, windowed_frames, sample_rate
 
-    return features
+def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=100, n_features=13, save_path=None, show_example=False):
+    if save_path and os.path.exists(save_path):
+        return np.load(save_path)
 
-# Função para carregar o dataset e aplicar fusão
-def load_dataset(data_path, max_length=100):
+    emphasized_audio, frames, sample_rate = preprocess_audio(file_path, frame_length, hop_length)
+
+    # Extração das características
+    mfcc = librosa.feature.mfcc(y=emphasized_audio, sr=sample_rate, n_mfcc=n_features)
+    gfcc = librosa.feature.mfcc(y=emphasized_audio, sr=sample_rate, n_mfcc=n_features)  # Substituir por GFCC real
+    cqt = np.abs(librosa.cqt(y=emphasized_audio, sr=sample_rate, n_bins=n_features))  # Ajustar n_bins para n_features
+    lofar = librosa.amplitude_to_db(np.abs(librosa.stft(emphasized_audio, n_fft=frame_length))[:n_features, :], ref=np.max)
+    delta_mfcc = librosa.feature.delta(mfcc)
+
+    # Ajustar o número de frames para o mesmo tamanho
+    def pad_or_truncate(feature, max_frames):
+        if feature.shape[1] > max_frames:  # Truncar
+            return feature[:, :max_frames]
+        elif feature.shape[1] < max_frames:  # Preencher com zeros
+            return np.pad(feature, ((0, 0), (0, max_frames - feature.shape[1])), mode='constant')
+        return feature
+
+    mfcc = pad_or_truncate(mfcc, max_frames)
+    gfcc = pad_or_truncate(gfcc, max_frames)
+    cqt = pad_or_truncate(cqt, max_frames)
+    lofar = pad_or_truncate(lofar, max_frames)
+    delta_mfcc = pad_or_truncate(delta_mfcc, max_frames)
+
+    # Fusão de características
+    fused_features = np.concatenate([mfcc, gfcc, cqt, lofar, delta_mfcc], axis=0)
+
+    # Salvar features
+    if save_path:
+        np.save(save_path, fused_features)
+
+    # Visualizar exemplo de cada feature e das features fusionadas
+    if show_example:
+        features = {"MFCC": mfcc, "GFCC": gfcc, "CQT": cqt, "LOFAR": lofar, "Delta-MFCC": delta_mfcc, "Fused Features": fused_features}
+        for name, feature in features.items():
+            plt.figure(figsize=(10, 4))
+            librosa.display.specshow(feature, sr=sample_rate, x_axis='time', cmap='viridis')
+            plt.colorbar(format='%+2.0f dB')
+            plt.title(name)
+            plt.tight_layout()
+            plt.show()
+
+    return fused_features
+
+# Função para processar um único arquivo de áudio
+def process_audio_file(args):
+    file_path, class_index, frame_length, hop_length, max_frames, n_features, save_dir = args
+    save_path = None
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, os.path.basename(file_path) + '.npy')
+    features = extract_features(file_path, frame_length, hop_length, max_frames, n_features, save_path=save_path)
+    return features, class_index
+
+# Função para carregar dataset organizado em subpastas com ThreadPoolExecutor
+def load_dataset(dataset_path, frame_length=2048, hop_length=512, max_frames=100, n_features=13, save_dir=None):
     X, y = [], []
-    class_mapping = {}
+    classes = sorted(os.listdir(dataset_path))
+    class_to_index = {cls_name: idx for idx, cls_name in enumerate(classes)}
 
-    for class_id, class_folder in enumerate(os.listdir(data_path)):
-        class_path = os.path.join(data_path, class_folder)
-        if os.path.isdir(class_path):
-            class_mapping[class_id] = class_folder
-            for audio_file in os.listdir(class_path):
-                file_path = os.path.join(class_path, audio_file)
-                if file_path.endswith(('.wav', '.mp3')):
-                    features = extract_features(file_path, max_length)
-                    X.append(features)
-                    y.append(class_id)
+    tasks = []
+    for cls_name in classes:
+        cls_path = os.path.join(dataset_path, cls_name)
+        if os.path.isdir(cls_path):
+            for file_name in os.listdir(cls_path):
+                file_path = os.path.join(cls_path, file_name)
+                if file_name.endswith(('.wav', '.mp3')):
+                    tasks.append((file_path, class_to_index[cls_name], frame_length, hop_length, max_frames, n_features, save_dir))
 
-    return np.array(X), np.array(y), class_mapping
+    with ThreadPoolExecutor() as executor:
+        results = list(tqdm(executor.map(process_audio_file, tasks), total=len(tasks), desc="Processando arquivos de áudio"))
+        for features, label in results:
+            X.append(features)
+            y.append(label)
 
-# Redução de dimensionalidade com NCA
-def reduce_dimensionality(X, y):
-    nca = NeighborhoodComponentsAnalysis(random_state=42)
-    X_reduced = nca.fit_transform(X.reshape(len(X), -1), y)
-    return X_reduced
+    return np.array(X), np.array(y), class_to_index
 
-# Construção do modelo ResNet18
+# Função para construir modelo ResNet18
 def build_resnet18(input_shape, num_classes):
     inputs = layers.Input(shape=input_shape)
     x = layers.Conv2D(64, kernel_size=7, strides=2, padding='same')(inputs)
@@ -87,24 +148,29 @@ def build_resnet18(input_shape, num_classes):
                   metrics=['accuracy'])
     return model
 
-# Caminho dos dados
-data_path = r"C:\\Users\\Gustavo\\Desktop\\deepship"
-X, y, class_mapping = load_dataset(data_path, max_length=100)
+# Caminho para o dataset
+dataset_path = r'C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\DeepShip-main'
+save_dir = r'C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\DeepShip-main\processed_features'
 
-# Reduzir dimensionalidade
-X_reduced = reduce_dimensionality(X, y)
+# Mostrar um exemplo de áudio e suas features antes de carregar todo o dataset
+example_audio_path = os.path.join(dataset_path, os.listdir(dataset_path)[0], os.listdir(os.path.join(dataset_path, os.listdir(dataset_path)[0]))[0])
+preprocess_audio(example_audio_path, show_example=True)
+extract_features(example_audio_path, show_example=True)
 
-# Divisão treino/teste
-X_train, X_test, y_train, y_test = train_test_split(X_reduced, y, test_size=0.25, random_state=42)
+# Carregar o dataset
+X, y, class_to_index = load_dataset(dataset_path, save_dir=save_dir)
 
-# Ajustar formato para entrada no modelo
-X_train = X_train.reshape((-1, 10, 10, 1))  # Ajustar para formato 2D
-X_test = X_test.reshape((-1, 10, 10, 1))
+# Dividir os dados em treino e teste
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Construir e treinar o modelo
-model = build_resnet18(input_shape=X_train.shape[1:], num_classes=len(class_mapping))
-history = model.fit(X_train, y_train, epochs=30, batch_size=5, validation_data=(X_test, y_test))
+# Ajustar formato para entrada no modelo ResNet
+X_train = X_train[..., np.newaxis]  # Adicionar canal para 4D
+X_test = X_test[..., np.newaxis]
 
-# Avaliar modelo
-accuracy = model.evaluate(X_test, y_test, verbose=1)[1]
+# Construir e treinar o modelo ResNet18
+model = build_resnet18(input_shape=X_train.shape[1:], num_classes=len(class_to_index))
+history = model.fit(X_train, y_train, epochs=100, batch_size=4, validation_data=(X_test, y_test))
+
+# Avaliar o modelo
+loss, accuracy = model.evaluate(X_test, y_test)
 print(f"Acurácia: {accuracy * 100:.2f}%")
