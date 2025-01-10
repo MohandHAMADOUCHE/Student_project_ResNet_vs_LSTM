@@ -177,14 +177,14 @@ def reduce_and_visualize_with_nca(features, labels, n_components=2):
     reduced_features = nca.fit_transform(flattened_features, labels)
 
     # Visualize reduced features
-    plt.figure(figsize=(8, 6))
-    scatter = plt.scatter(reduced_features[:, 0], reduced_features[:, 1], c=labels, cmap='viridis', alpha=0.8)
-    plt.colorbar(scatter, label='Classes')
-    plt.title("Feature Screening Diagram (MGCL-Delta)")
-    plt.xlabel("NCA Dimension 1")
-    plt.ylabel("NCA Dimension 2")
-    plt.tight_layout()
-    plt.show()
+    #plt.figure(figsize=(8, 6))
+    #scatter = plt.scatter(reduced_features[:, 0], reduced_features[:, 1], c=labels, cmap='viridis', alpha=0.8)
+    #plt.colorbar(scatter, label='Classes')
+    #plt.title("Feature Screening Diagram (MGCL-Delta)")
+    #plt.xlabel("NCA Dimension 1")
+    #plt.ylabel("NCA Dimension 2")
+    #plt.tight_layout()
+    #plt.show()
 
     return reduced_features
 
@@ -296,19 +296,101 @@ def load_dataset(dataset_path, frame_length=2048, hop_length=512, max_frames=100
 
     return np.array(X), np.array(y), class_to_index
 
+
+import soundfile as sf
+from itertools import combinations
+import random
+
+
+import os
+import numpy as np
+import librosa
+import soundfile as sf
+from itertools import chain, combinations
+import random
+
+
+def mix_audio_files(file_paths, output_path, sample_rate=22050):
+    """
+    Combina múltiplos arquivos de áudio em um único arquivo mixado.
+
+    Args:
+        file_paths (list): Lista de caminhos dos arquivos de áudio.
+        output_path (str): Caminho para salvar o arquivo de áudio mixado.
+        sample_rate (int): Taxa de amostragem dos arquivos de áudio.
+
+    """
+    audios = [librosa.load(file_path, sr=sample_rate)[0] for file_path in file_paths]
+
+    # Garantir que os áudios tenham o mesmo comprimento
+    min_length = min(len(audio) for audio in audios)
+    audios = [audio[:min_length] for audio in audios]
+
+    # Mixar os áudios
+    mixed_audio = np.mean(audios, axis=0)
+
+    # Normalizar o áudio mixado
+    mixed_audio = np.clip(mixed_audio, -1.0, 1.0)
+
+    # Salvar o áudio mixado
+    sf.write(output_path, mixed_audio, sample_rate)
+
+
+def create_mixed_classes(dataset_path, sample_rate=22050):
+    """
+    Gera todas as combinações possíveis de áudios das classes existentes dentro das subpastas do dataset.
+
+    Args:
+        dataset_path (str): Caminho do diretório do dataset.
+        sample_rate (int): Taxa de amostragem dos arquivos de áudio.
+    """
+    class_dirs = [d for d in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, d))]
+    class_file_counts = {cls: len(os.listdir(os.path.join(dataset_path, cls))) for cls in class_dirs}
+    max_count = max(class_file_counts.values())
+
+    # Gerar todas as combinações possíveis de 2 a n classes
+    for num_classes in range(2, len(class_dirs) + 1):
+        for class_combination in combinations(class_dirs, num_classes):
+            combined_class_name = "_".join(class_combination)
+            combined_class_dir = os.path.join(dataset_path, combined_class_name)
+            os.makedirs(combined_class_dir, exist_ok=True)
+
+            # Carregar arquivos de áudio de cada classe
+            class_files = [
+                [os.path.join(dataset_path, class_dir, f) for f in os.listdir(os.path.join(dataset_path, class_dir)) if f.endswith(('.wav', '.mp3'))]
+                for class_dir in class_combination
+            ]
+
+            # Limitar o número de combinações ao tamanho da maior classe
+            combined_files = list(combinations(sum(class_files, []), num_classes))
+            random.shuffle(combined_files)
+            limited_combinations = combined_files[:max_count]
+
+            for file_paths in limited_combinations:
+                output_file_name = f"mix_{'_'.join([os.path.splitext(os.path.basename(f))[0] for f in file_paths])}.wav"
+                output_file_path = os.path.join(combined_class_dir, output_file_name)
+
+                mix_audio_files(file_paths, output_file_path, sample_rate)
+
+            print(f"Combinações salvas em: {combined_class_dir}")
+
+
 # ======================
 # Main Workflow
 # ======================
 
 def main():
-    dataset_path = r'C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\DeepShip-main'
-    save_dir = r'C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\DeepShip-main\processed_features'
+    dataset_path = r'C:\Users\Gustavo\Desktop\deepship\Todos menos Passengership'
+    save_dir = r'C:\Users\Gustavo\Desktop\deepship\processed_features'
     model_save_path = "resnet18_model.h5"
+
+    create_mixed_classes(dataset_path)
+
 
     # Example audio and feature extraction
     example_audio_path = os.path.join(dataset_path, os.listdir(dataset_path)[0], os.listdir(os.path.join(dataset_path, os.listdir(dataset_path)[0]))[0])
-    preprocess_audio(example_audio_path, show_example=True)
-    extract_features(example_audio_path, show_example=True)
+    #preprocess_audio(example_audio_path, show_example=True)
+    #extract_features(example_audio_path, show_example=True)
 
     # Load dataset
     X, y, class_to_index = load_dataset(dataset_path, save_dir=save_dir)
