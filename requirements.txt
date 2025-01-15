@@ -10,3 +10,4 @@ pygame
 pillow
 ttkbootstrap
 fpdf
+tqdm

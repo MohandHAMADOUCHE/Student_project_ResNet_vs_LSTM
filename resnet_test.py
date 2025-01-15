@@ -10,6 +10,8 @@ from tensorflow.keras import layers, models, optimizers
 from tensorflow.keras.callbacks import EarlyStopping
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
+from gammatone.gtgram import gtgram
+
 
 # ==============================
 # Audio Preprocessing Functions
@@ -28,7 +30,7 @@ def preprocess_audio(file_path, frame_length=2048, hop_length=512, show_example=
     Returns:
         tuple: Emphasized audio, framed and windowed signal, sample rate.
     """
-    audio, sample_rate = librosa.load(file_path, sr=None)
+    audio, sample_rate = librosa.load(file_path, sr=None, duration=30.0)
 
     # Apply pre-emphasis
     pre_emphasis = 0.97
@@ -94,6 +96,16 @@ def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=10
     Returns:
         np.ndarray: Concatenated feature matrix.
     """
+
+    def compute_gfcc(audio, sr, n_filters=64, frame_length=0.025, hop_length=0.01, f_min=50):
+        # Aplicar filtro Gammatone
+        gammatone_features = gtgram(audio, sr, frame_length, hop_length, n_filters, f_min)
+
+        # Aplicar log para simular compressão cepstral
+        gfcc = np.log(np.abs(gammatone_features) + 1e-8)
+
+        return gfcc
+
     if save_path and os.path.exists(save_path):
         return np.load(save_path)
 
@@ -101,7 +113,7 @@ def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=10
 
     # Extract features
     mfcc = librosa.feature.mfcc(y=emphasized_audio, sr=sample_rate, n_mfcc=n_features)
-    gfcc = librosa.feature.mfcc(y=emphasized_audio, sr=sample_rate, n_mfcc=n_features) * 0.9  # Approximation for GFCC
+    gfcc = compute_gfcc(emphasized_audio, sample_rate)
     cqt = np.abs(librosa.cqt(y=emphasized_audio, sr=sample_rate, n_bins=84))
     lofar = librosa.amplitude_to_db(np.abs(librosa.stft(emphasized_audio, n_fft=frame_length))[:n_features, :], ref=np.max)
     delta_mfcc = librosa.feature.delta(mfcc)
@@ -177,14 +189,14 @@ def reduce_and_visualize_with_nca(features, labels, n_components=2):
     reduced_features = nca.fit_transform(flattened_features, labels)
 
     # Visualize reduced features
-    #plt.figure(figsize=(8, 6))
-    #scatter = plt.scatter(reduced_features[:, 0], reduced_features[:, 1], c=labels, cmap='viridis', alpha=0.8)
-    #plt.colorbar(scatter, label='Classes')
-    #plt.title("Feature Screening Diagram (MGCL-Delta)")
-    #plt.xlabel("NCA Dimension 1")
-    #plt.ylabel("NCA Dimension 2")
-    #plt.tight_layout()
-    #plt.show()
+    plt.figure(figsize=(8, 6))
+    scatter = plt.scatter(reduced_features[:, 0], reduced_features[:, 1], c=labels, cmap='viridis', alpha=0.8)
+    plt.colorbar(scatter, label='Classes')
+    plt.title("Feature Screening Diagram (MGCL-Delta)")
+    plt.xlabel("NCA Dimension 1")
+    plt.ylabel("NCA Dimension 2")
+    plt.tight_layout()
+    plt.show()
 
     return reduced_features
 
@@ -380,15 +392,15 @@ def create_mixed_classes(dataset_path, sample_rate=22050):
 # ======================
 
 def main():
-    dataset_path = r'C:\Users\Gustavo\Desktop\deepship\Todos menos Passengership'
-    save_dir = r'C:\Users\Gustavo\Desktop\deepship\processed_features'
-    model_save_path = "resnet18_model.h5"
+    dataset_path = r'D:\deepship\Original'
+    save_dir = r'D:\deepship\processed_features'
+    model_save_path = r"D:\deepship\Original\resnet18_model.h5"
 
-    create_mixed_classes(dataset_path)
+    #create_mixed_classes(dataset_path)
 
 
     # Example audio and feature extraction
-    example_audio_path = os.path.join(dataset_path, os.listdir(dataset_path)[0], os.listdir(os.path.join(dataset_path, os.listdir(dataset_path)[0]))[0])
+    #example_audio_path = os.path.join(dataset_path, os.listdir(dataset_path)[0], os.listdir(os.path.join(dataset_path, os.listdir(dataset_path)[0]))[0])
     #preprocess_audio(example_audio_path, show_example=True)
     #extract_features(example_audio_path, show_example=True)
 

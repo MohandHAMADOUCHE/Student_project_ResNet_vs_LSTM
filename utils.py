@@ -3,8 +3,9 @@ import os
 
 from matplotlib import pyplot as plt
 config = {
-    "data_path": r"C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\Revisão Literaria\UrbanSound8K\UrbanSound8K\audio",
+    "data_path": r"D:\deepship\Original",
     "metadata_path": r"C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\Revisão Literaria\UrbanSound8K\UrbanSound8K\metadata\UrbanSound8K.csv",
+    "save_dir": r"D:\deepship\processed_features",
     "epochs": 100,
     "batch_size": 32,
     "test_size": 0.2,
@@ -39,6 +40,7 @@ config = {
 
 model_paths = {
                 "resnet": "resnet_model.keras",
+                "resnet18": "resnet18_model.keras",
                 "lstm": "lstm_model.keras",
                 "transformer": "transformer_model.keras",
             }

@@ -23,7 +23,7 @@ def use_pretrained_models():
          print("Error", str(e))
 
 if __name__ == "__main__":
-    X_train, y_train, X_test, y_test, class_mapping = load_dataset_from_folders(r"C:\Users\gumar\OneDrive\Área de Trabalho\Pesquisa UBO\DeepShip-main")
+    X_train, y_train, X_test, y_test, class_mapping = load_dataset_from_folders()
     #X_train, y_train, X_test, y_test = load_dataset()
     root = build_interface(
         config=config,
