@@ -13,13 +13,9 @@ from fpdf import FPDF
 import shutil
 import pickle
 from training import load_and_compile_model, load_training_data
-from utils import config, display_images, model_paths
-
-# Lista para armazenar imagens geradas
-image_list = []
 
 # Salvar uma figura na lista de imagens
-def save_figure_to_list():
+def save_figure_to_list(image_list):
     import io
     from PIL import Image
     buf = io.BytesIO()
@@ -29,6 +25,34 @@ def save_figure_to_list():
     image_list.append(np.array(image))
     buf.close()
     plt.close()
+
+# Display all generated plots interactively
+def display_images(image_list):
+    if not image_list:
+        print("No images were generated.")
+        return
+
+    current_image_index = 0
+
+    def update_image():
+        plt.clf()
+        plt.imshow(image_list[current_image_index])
+        plt.axis('off')
+        plt.title(f"Image {current_image_index + 1} of {len(image_list)}")
+        plt.draw()
+
+    def on_key(event):
+        nonlocal current_image_index
+        if event.key == 'right':
+            current_image_index = (current_image_index + 1) % len(image_list)
+        elif event.key == 'left':
+            current_image_index = (current_image_index - 1) % len(image_list)
+        update_image()
+
+    fig, ax = plt.subplots()
+    fig.canvas.mpl_connect('key_press_event', on_key)
+    update_image()
+    plt.show()
 
 # Avaliar desempenho do modelo
 def evaluate_model_performance(y_true, y_pred, class_names):
@@ -43,7 +67,7 @@ def evaluate_model_performance(y_true, y_pred, class_names):
     return report, auc_score
 
 # Plotar métricas comparativas entre modelos selecionados
-def plot_metrics_comparison(reports, auc_scores, class_names):
+def plot_metrics_comparison(reports, auc_scores, class_names, image_list):
     metrics = ['precision', 'recall', 'f1-score']
     
     for metric in metrics:
@@ -56,7 +80,7 @@ def plot_metrics_comparison(reports, auc_scores, class_names):
         plt.title(f"Comparison of {metric.capitalize()} across Models")
         plt.xticks(np.arange(len(class_names)), class_names, rotation=45)
         plt.legend()
-        save_figure_to_list()
+        save_figure_to_list(image_list)
     
     # Comparação do AUC
     plt.figure(figsize=(6, 6))
@@ -64,18 +88,18 @@ def plot_metrics_comparison(reports, auc_scores, class_names):
         plt.bar(model_name, auc_score)
     plt.title("Comparison of AUC across Models")
     plt.ylabel("AUC Score")
-    save_figure_to_list()
+    save_figure_to_list(image_list)
 
 # Plotar matriz de confusão
-def plot_confusion_matrix(y_true, y_pred, class_names, method):
+def plot_confusion_matrix(y_true, y_pred, class_names, method, image_list):
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names)
     plt.title(f"Confusion Matrix - {method}")
-    save_figure_to_list()
+    save_figure_to_list(image_list)
 
 # Plotar curvas ROC para classificação multiclasse
-def plot_multiclass_roc(y_true, y_pred, class_names, method):
+def plot_multiclass_roc(y_true, y_pred, class_names, method, image_list):
     y_true_bin = to_categorical(y_true, num_classes=len(class_names))
     y_pred_bin = to_categorical(y_pred, num_classes=len(class_names))
     plt.figure(figsize=(10, 8))
@@ -87,103 +111,90 @@ def plot_multiclass_roc(y_true, y_pred, class_names, method):
     plt.plot([0, 1], [0, 1], 'k--', lw=2)
     plt.title(f"ROC Curves - {method}")
     plt.legend(loc="lower right")
-    save_figure_to_list()
+    save_figure_to_list(image_list)
 
 # Plotar comparação de desempenho entre modelos
-def plot_comparison(training_times, classification_times, histories):
-    # Definir cores dinamicamente para a precisão (Training vs Validation)
-    colors = cycle(plt.cm.tab10.colors)  # Usando cores genéricas do matplotlib
-    
-    # Plotar as comparações de precisão entre os modelos selecionados
+def plot_comparison(training_times, classification_times, histories, image_list, config):
+    """
+    Compara desempenho de modelos selecionados com base em métricas de treino, validação, 
+    tempo de treinamento e classificação.
+    """
+    # Comparar precisão (accuracy) entre os modelos
     plt.figure(figsize=(14, 6))
-    for model_name, history in histories.items():
-        if model_name in config["selected_models"]:  # Verifica se o modelo foi selecionado
-            epochs = range(1, len(history['accuracy']) + 1)
-            plt.plot(epochs, history['accuracy'], label=f'{model_name} Training', color=next(colors))
-            plt.plot(epochs, history['val_accuracy'], label=f'{model_name} Validation', linestyle='--', color=next(colors))
+    colors = cycle(plt.cm.tab10.colors)  # Usar ciclo de cores
+    for model_name, is_selected in config["selected_models"].items():
+        if not is_selected:
+            continue
+        
+        # Obter métricas do modelo
+        model_history = histories.get(model_name, {})
+        training_accuracy = model_history.get('accuracy', [])
+        validation_accuracy = model_history.get('val_accuracy', [])
+        epochs = range(1, len(training_accuracy) + 1)
+
+        # Plotar treino e validação
+        color = next(colors)
+        plt.plot(epochs, training_accuracy, label=f'{model_name} Training', color=color)
+        plt.plot(epochs, validation_accuracy, label=f'{model_name} Validation', linestyle='--', color=color)
+    
+    # Configuração do gráfico
     plt.title('Accuracy Comparison')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend(loc="best")
-    save_figure_to_list()
-    
+    save_figure_to_list(image_list)
+
     # Comparar tempo de treinamento (apenas modelos selecionados)
     plt.figure(figsize=(8, 6))
-    selected_training_times = {key: value for key, value in training_times.items() if key in config["selected_models"]}
-    colors = cycle(plt.cm.tab10.colors)  # Usando um conjunto de cores do matplotlib
+    selected_training_times = {key: value for key, value in training_times.items() if config["selected_models"].get(key, False)}
+    colors = cycle(plt.cm.tab10.colors)
     plt.bar(selected_training_times.keys(), selected_training_times.values(), color=[next(colors) for _ in selected_training_times])
     plt.title('Training Time (seconds)')
     plt.ylabel('Time (seconds)')
-    plt.legend()  # Garantindo que a legenda apareça para as barras
-    save_figure_to_list()
+    save_figure_to_list(image_list)
 
     # Comparar tempo de classificação (apenas modelos selecionados)
     plt.figure(figsize=(8, 6))
-    selected_classification_times = {key: value for key, value in classification_times.items() if key in config["selected_models"]}
+    selected_classification_times = {key: value for key, value in classification_times.items() if config["selected_models"].get(key, False)}
+    colors = cycle(plt.cm.tab10.colors)
     plt.bar(selected_classification_times.keys(), selected_classification_times.values(), color=[next(colors) for _ in selected_classification_times])
     plt.title('Classification Time (seconds)')
     plt.ylabel('Time (seconds)')
-    plt.legend()  # Garantindo que a legenda apareça para as barras
-    save_figure_to_list()
-
-
-def plot_image_models(image_path):
-    """
-    Exibe uma imagem no plot do matplotlib.
-
-    :param image_path: Caminho para a imagem no computador.
-    :param method: Nome ou descrição do método, usado como título do gráfico.
-    """
-    # Carregar a imagem
-    img = Image.open(image_path)
-
-    # Configurar o plot
-    plt.figure(figsize=(20, 16))
-    plt.imshow(img)
-    plt.axis("off")  # Remove os eixos para focar na imagem
-    
-    save_figure_to_list()  # Salva a imagem do gráfico
-    plt.close()  # Fecha o gráfico
+    save_figure_to_list(image_list)
 
 # Função principal para executar a análise
-def do_all_analysis(X_test, y_test):
-    y_true = y_test.argmax(axis=1)  # Garantir que y_true está em formato de rótulo (classe)
-    reports = {}
-    auc_scores = {}
-    classification_times = {}
+def do_all_analysis(X_test, y_test, config, class_to_index, image_list):
+    y_true = y_test.argmax(axis=1) if len(y_test.shape) > 1 else y_test
+    reports, auc_scores, classification_times = {}, {}, {}
 
-    plot_image_models("models.png")
-
-    print("Loading pretrained models...")
-    for model_name in config["selected_models"]:
-        model = load_and_compile_model(model_paths[model_name])
-        
+    for model_name, is_selected in config["selected_models"].items():
+        if not is_selected:
+            continue
+        print(f"Loading model: {model_name}")
+        model = load_and_compile_model(f"{model_name}_model.keras")
         # Começar a classificação para cada modelo individualmente
         start_classification = time.time()
-        y_pred = model.predict(X_test).argmax(axis=1)  # Obtenção da classe com maior probabilidade
+        y_pred = model.predict(X_test).argmax(axis=1)
         classification_times[model_name] = time.time() - start_classification
-        
-        # Calcular as métricas para cada modelo
-        report, auc_score = evaluate_model_performance(y_true, y_pred, [f"Class {i}" for i in range(config["num_classes"])] )
-        
+    
+        class_names = [f"Class {i}" for i in range(len(class_to_index))]
+        report, auc_score = evaluate_model_performance(y_true, y_pred, class_names)
         reports[model_name] = report
         auc_scores[model_name] = auc_score
         
-        # Plotar matriz de confusão e curvas ROC individualmente para cada modelo
-        plot_confusion_matrix(y_true, y_pred, [f"Class {i}" for i in range(config["num_classes"])], model_name)
-        plot_multiclass_roc(y_true, y_pred, [f"Class {i}" for i in range(config["num_classes"])], model_name)
-    
-    print("Pretrained models loaded and compiled successfully!")
+        plot_confusion_matrix(y_true, y_pred, class_names, model_name, image_list)
+        plot_multiclass_roc(y_true, y_pred, class_names, model_name, image_list)
 
     # Plotar métricas comparativas entre modelos
-    plot_metrics_comparison(reports, auc_scores, [f"Class {i}" for i in range(config["num_classes"])])
+    plot_metrics_comparison(reports, auc_scores, [f"Class {i}" for i in range(len(class_to_index))], image_list)
     
     # Plotar comparação de desempenho (tempo de treinamento, tempo de classificação)
     training_times, histories, _ = load_training_data()
-    plot_comparison(training_times, classification_times, histories)
+    plot_comparison(training_times, classification_times, histories, image_list, config)
     
-    save_analysis_results(reports, training_times, classification_times, auc_scores, image_list, model_paths, config)
+    #save_analysis_results(reports, training_times, classification_times, auc_scores, image_list, model_paths, config)
     
+    print("Analysis complete. Displaying results...")
     display_images(image_list)
 
 

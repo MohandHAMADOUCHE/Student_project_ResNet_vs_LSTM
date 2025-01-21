@@ -3,12 +3,12 @@ from ttkbootstrap import Style
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pygame
-from preprocessing import load_class_names, process_single_audio
-from training import load_and_compile_model
-from utils import model_paths, config
+from preprocessing import preprocessing, load_preprocessed, process_audio_file
+from training import train
+from analysis import do_all_analysis
 
 
-def load_audio_and_classify(class_names_file="classes.json"):
+def load_audio_and_classify(config, class_names_file="classes.json"):
     """Carrega e classifica um arquivo de áudio selecionado pelo usuário."""
     try:
         # Abrir diálogo para selecionar um arquivo de áudio
@@ -20,7 +20,7 @@ def load_audio_and_classify(class_names_file="classes.json"):
         print(f"Selected audio file: {audio_file}")
 
         # Processar o arquivo de áudio
-        audio_data, _ = process_single_audio(audio_file, None)  # O class_label não é necessário aqui
+        audio_data, _ = process_audio_file(audio_file, None)  # O class_label não é necessário aqui
         if audio_data is None:
             raise ValueError("Error processing the audio file.")
 
@@ -35,18 +35,16 @@ def load_audio_and_classify(class_names_file="classes.json"):
         while pygame.mixer.music.get_busy():
             pygame.time.Clock().tick(10)
 
-        # Carregar modelos
-        resnet_model = load_and_compile_model(model_paths["resnet"])
-        lstm_model = load_and_compile_model(model_paths["lstm"])
-        transformer_model = load_and_compile_model(model_paths["transformer"])
 
-        # Fazer previsões
-        resnet_pred_id = resnet_model.predict(audio_data).argmax(axis=1)[0]
-        lstm_pred_id = lstm_model.predict(audio_data).argmax(axis=1)[0]
-        transformer_pred_id = transformer_model.predict(audio_data).argmax(axis=1)[0]
 
+        for model_name, is_selected in config["selected_models"].items():
+            if not is_selected:
+                continue
+            model = load_and_compile_model(f"{model_name}_model.keras")
+            model_pred_id = model.predict(audio_data).argmax(axis=1)[0]
+        
         # Carregar nomes das classes
-        class_names = load_class_names(class_names_file)
+        class_names = "" #load_class_names(class_names_file)
 
         # Mapear IDs para nomes das classes
         resnet_pred = class_names.get(resnet_pred_id, "Unknown")
@@ -64,32 +62,36 @@ def load_audio_and_classify(class_names_file="classes.json"):
     except Exception as e:
         messagebox.showerror("Error", f"Error classifying the audio file: {e}")
 
-def update_config(config, validate_path, root_style):
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+
+def update_config(config, root_style):
     """Janela para atualizar a configuração com layout em abas."""
+
     def save_changes():
+        """Salva alterações na configuração."""
         try:
-            # Atualiza valores gerais
-            for key, var in vars_dict.items():
-                if key == "preprocessing_methods":  # Lidando com métodos de pré-processamento
-                    for subkey, subvar in vars_dict[key].items():
-                        config[key][subkey] = subvar.get() == "1"
-                else:
-                    value = var.get()
-                    if isinstance(config[key], int):
-                        config[key] = int(value)
-                    elif isinstance(config[key], float):
-                        config[key] = float(value)
-                    elif isinstance(config[key], str):
-                        config[key] = validate_path(value)
+            # Atualiza valores na configuração
+            for section, sub_dict in vars_dict.items():
+                for key, var in sub_dict.items():
+                    if isinstance(config[section][key], bool):
+                        config[section][key] = var.get() == "1"
+                    elif isinstance(config[section][key], int):
+                        config[section][key] = int(var.get())
+                    elif isinstance(config[section][key], float):
+                        config[section][key] = float(var.get())
+                    else:
+                        config[section][key] = var.get()
             messagebox.showinfo("Success", "Configuration updated successfully!")
             config_window.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Invalid input: {e}")
 
-    def browse_file(var):
-        filepath = filedialog.askopenfilename(title="Select a File")
-        if filepath:
-            var.set(filepath)
+    def browse_folder(var):
+        """Abre dialog para seleção de pasta."""
+        folder_path = filedialog.askdirectory(title="Select a Folder")
+        if folder_path:
+            var.set(folder_path)
 
     config_window = tk.Toplevel()
     config_window.title("Configuration Panel")
@@ -99,156 +101,57 @@ def update_config(config, validate_path, root_style):
     header = ttk.Label(config_window, text="Update Configuration", font=("Helvetica", 16, "bold"))
     header.pack(pady=10)
 
-    # Criar o notebook para dividir em abas
+    # Criar notebook para abas
     notebook = ttk.Notebook(config_window)
     notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
     vars_dict = {}
 
-    # Aba de configurações gerais
-    general_frame = ttk.Frame(notebook, padding=10)
-    notebook.add(general_frame, text="General Settings")
+    # Criar uma aba para cada seção de configuração
+    for section, settings in config.items():
+        if isinstance(settings, dict):
+            section_frame = ttk.Frame(notebook, padding=10)
+            notebook.add(section_frame, text=section.replace("_", " ").title())
+            vars_dict[section] = {}
 
-    row = 0
-    for key, value in config.items():
-        # Ignorar configurações específicas de modelos ou dicionários
-        if key in [
-            "lstm_units", "lstm_dropout",
-            "resnet_filters", "resnet_kernel_size", "resnet_blocks",
-            "transformer_heads", "transformer_ff_dim", "transformer_layers", "transformer_epsilon"
-        ] or isinstance(value, dict):
-            continue
-        label = ttk.Label(general_frame, text=key.replace("_", " ").title(), font=("Helvetica", 12))
-        label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
+            row = 0
+            for key, value in settings.items():
+                label = ttk.Label(section_frame, text=key.replace("_", " ").title(), font=("Helvetica", 12))
+                label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
 
-        vars_dict[key] = tk.StringVar(value=value)
-        entry = ttk.Entry(general_frame, textvariable=vars_dict[key], width=40)
-        entry.grid(row=row, column=1, padx=10, pady=5)
+                # Checkbutton para booleanos
+                if isinstance(value, bool):
+                    vars_dict[section][key] = tk.StringVar(value="1" if value else "0")
+                    checkbox = ttk.Checkbutton(section_frame, variable=vars_dict[section][key])
+                    checkbox.grid(row=row, column=1, sticky="w", padx=10, pady=5)
 
-        if key.endswith("_path"):
-            browse_btn = ttk.Button(general_frame, text="Browse", command=lambda var=vars_dict[key]: browse_file(var))
-            browse_btn.grid(row=row, column=2, padx=5)
+                # Entrada padrão para outros tipos de dados
+                else:
+                    vars_dict[section][key] = tk.StringVar(value=str(value))
+                    entry = ttk.Entry(section_frame, textvariable=vars_dict[section][key], width=40)
+                    entry.grid(row=row, column=1, padx=10, pady=5)
 
-        row += 1
+                    # Botão de navegação para seleção de pasta
+                    if key in ["data_path", "save_dir"]:
+                        browse_btn = ttk.Button(section_frame, text="Browse",
+                                                command=lambda var=vars_dict[section][key]: browse_folder(var))
+                        browse_btn.grid(row=row, column=2, padx=5)
 
-    # Abas específicas para os modelos
-    for model, settings in {
-        "LSTM Settings": {
-            "lstm_units": config["lstm_units"],
-            "lstm_dropout": config["lstm_dropout"],
-        },
-        "ResNet Settings": {
-            "resnet_filters": config["resnet_filters"],
-            "resnet_kernel_size": config["resnet_kernel_size"],
-            "resnet_blocks": config["resnet_blocks"],
-        },
-        "Transformer Settings": {
-            "transformer_heads": config["transformer_heads"],
-            "transformer_ff_dim": config["transformer_ff_dim"],
-            "transformer_layers": config["transformer_layers"],
-            "transformer_epsilon": config["transformer_epsilon"],
-        },
-    }.items():
-        model_frame = ttk.Frame(notebook, padding=10)
-        notebook.add(model_frame, text=model)
-
-        row = 0
-        for key, value in settings.items():
-            label = ttk.Label(model_frame, text=key.replace("_", " ").title(), font=("Helvetica", 12))
-            label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
-
-            vars_dict[key] = tk.StringVar(value=value)
-            entry = ttk.Entry(model_frame, textvariable=vars_dict[key], width=40)
-            entry.grid(row=row, column=1, padx=10, pady=5)
-            row += 1
-
-    # Aba de métodos de pré-processamento
-    preprocessing_frame = ttk.Frame(notebook, padding=10)
-    notebook.add(preprocessing_frame, text="Preprocessing Methods")
-
-    row = 0
-    vars_dict["preprocessing_methods"] = {}
-    for method, enabled in config["preprocessing_methods"].items():
-        label = ttk.Label(preprocessing_frame, text=method, font=("Helvetica", 12))
-        label.grid(row=row, column=0, sticky="w", padx=10, pady=5)
-
-        var = tk.StringVar(value="1" if enabled else "0")
-        checkbox = ttk.Checkbutton(preprocessing_frame, variable=var)
-        checkbox.grid(row=row, column=1, sticky="w", padx=10, pady=5)
-
-        vars_dict["preprocessing_methods"][method] = var
-        row += 1
+                row += 1
 
     save_btn = ttk.Button(config_window, text="Save Changes", style="success.TButton", command=save_changes)
     save_btn.pack(fill="x", padx=20, pady=10)
 
-def select_models(callback):
-    """
-    Exibe uma janela para selecionar os modelos que o usuário deseja usar.
-    Os modelos são carregados diretamente da configuração (model_paths).
-    Salva a seleção dos modelos na variável de configuração.
-    """
-    def confirm_selection():
-        selected_models = [var.get() for var in model_vars if var.get()]
-        if not selected_models:
-            messagebox.showwarning("No Selection", "Please select at least one model.")
-        else:
-            # Salvar a seleção de modelos na configuração
-            config["selected_models"] = selected_models
-            callback()
-            model_selection_window.destroy()
+def retrain(config, image_list):
+    X_train, y_train, X_test, y_test, class_to_index = preprocessing(config, image_list)
+    train(config, X_train, y_train, X_test, y_test, class_to_index)
+    do_all_analysis(X_test, y_test, config, class_to_index, image_list)
 
-    # Criar janela para seleção de modelos
-    model_selection_window = tk.Toplevel()
-    model_selection_window.title("Select Models")
-    model_selection_window.geometry("500x300")  # Tamanho ajustado para ser proporcional ao conteúdo
-    model_selection_window.configure(bg="#2E3B4E")  # Cor de fundo mais escura
+def utilize_pretrained_model(config, image_list):
+    X_test, y_test, class_to_index = load_preprocessed(config, image_list)
+    do_all_analysis(X_test, y_test, config, class_to_index, image_list)
 
-    # Estilo do título
-    header = ttk.Label(
-        model_selection_window,
-        text="Select Models to Use",
-        font=("Helvetica", 16, "bold"),
-        anchor="center",
-        foreground="white",
-        background="#0A74DA",  # Cor de fundo que combina com a interface principal
-        padding=10
-    )
-    header.grid(row=0, column=0, columnspan=3, pady=10, sticky="ew")
-
-    # Configurar layout para ocupar toda a largura
-    model_selection_window.columnconfigure(0, weight=1)  # Coluna única ocupa toda a largura
-
-    # Usando model_paths do utils.py para obter os modelos disponíveis
-    model_vars = []
-    for i, model_name in enumerate(model_paths.keys(), start=1):
-        var = tk.StringVar(value=model_name)  # Definir todos como selecionados por padrão
-        checkbox = ttk.Checkbutton(
-            model_selection_window,
-            text=model_name.capitalize(),
-            variable=var,
-            onvalue=model_name,
-            offvalue="",
-            style="primary.TCheckbutton"  # Estilo mais bonito e moderno
-        )
-        checkbox.grid(row=i, column=0, padx=20, pady=5, sticky="ew")  # Ocupa toda a largura
-        model_vars.append(var)
-
-    # Botão de confirmação
-    confirm_btn = ttk.Button(
-        model_selection_window,
-        text="Confirm Selection",
-        command=confirm_selection,
-        style="large.TButton"
-    )
-    confirm_btn.grid(row=len(model_paths) + 1, column=0, pady=20, padx=20, sticky="ew")  # Botão ocupa toda a largura
-
-    # Ajustar o estilo
-    style = Style("darkly")
-    style.configure("large.TButton", font=("Helvetica", 12), padding=10)
-    style.configure("primary.TCheckbutton", font=("Helvetica", 12), padding=10, background="#0A74DA")
-
-def build_interface(config, retrain_models, use_pretrained_models, validate_path):
+def build_interface(config, image_list):
     print("Loading interface...")
 
     """Constrói e inicializa a interface principal com design aprimorado."""
@@ -278,12 +181,14 @@ def build_interface(config, retrain_models, use_pretrained_models, validate_path
     root.rowconfigure([1, 2, 3, 4], weight=1)  # Cada botão ocupa a mesma altura
     root.columnconfigure(0, weight=1)         # Única coluna que ocupa toda a largura
 
+    image_list = []
+
     # Botões estilizados
     buttons = [
-        ("⚙️ --- [ Update Configuration] --- ⚙️", lambda: update_config(config, validate_path, style)),
-        ("📚 ------- [Retrain  Models] ------- 📚", lambda: select_models(retrain_models)),
-        ("🤖 --- [Use Pretrained Models] --- 🤖", lambda: select_models(use_pretrained_models)),
-        ("🎵 -------- [Classify  Audio] -------- 🎵", lambda: load_audio_and_classify()),
+        ("⚙️ --- [ Update Configuration] --- ⚙️", lambda: update_config(config, style)),
+        ("📚 ------- [Retrain  Models] ------- 📚", lambda: retrain(config, image_list) ),
+        ("🤖 --- [Use Pretrained Models] --- 🤖", lambda: utilize_pretrained_model(config, image_list) ),
+        ("🎵 -------- [Classify  Audio] -------- 🎵", lambda: load_audio_and_classify(config)),
     ]
 
     for i, (text, command) in enumerate(buttons, start=1):
