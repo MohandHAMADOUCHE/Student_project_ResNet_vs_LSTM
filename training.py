@@ -11,18 +11,18 @@ def build_lstm_model(input_shape, config, num_classes):
         # Input layer to define the shape of the input
         layers.Input(shape=input_shape),
         # First LSTM layer with sequence output and dropout
-        layers.LSTM(config["lstm_config"]["lstm_units"], return_sequences=True, dropout=config["lstm_config"]["lstm_dropout"]),
+        layers.LSTM(config["lstm"]["lstm_units"], return_sequences=True, dropout=config["lstm"]["lstm_dropout"]),
         # Second LSTM layer without sequence output
-        layers.LSTM(config["lstm_config"]["lstm_units"], dropout=config["lstm_config"]["lstm_dropout"]),
+        layers.LSTM(config["lstm"]["lstm_units"], dropout=config["lstm"]["lstm_dropout"]),
         # Dense layer to extract features
-        layers.Dense(config["general_config"]["dense_units"], activation='relu'),
+        layers.Dense(config["general"]["dense_units"], activation='relu'),
         # Dropout layer for regularization
-        layers.Dropout(rate=config["lstm_config"]["lstm_dropout"]),
+        layers.Dropout(rate=config["lstm"]["lstm_dropout"]),
         # Output layer for multi-class classification
         layers.Dense(num_classes, activation='softmax')
     ])
     # Compile the model with Adam optimizer and categorical cross-entropy loss
-    model.compile(optimizer=optimizers.Adam(learning_rate=config["general_config"]["learning_rate"]),
+    model.compile(optimizer=optimizers.Adam(learning_rate=config["general"]["learning_rate"]),
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
     return model
@@ -32,21 +32,21 @@ def build_resnet_model(input_shape, config, num_classes):
     # Input layer
     inputs = layers.Input(shape=input_shape)
     # Initial convolution, batch normalization, activation, and pooling
-    x = layers.Conv1D(config["resnet_config"]["resnet_filters"], kernel_size=7, strides=2, padding='same')(inputs)
+    x = layers.Conv1D(config["resnet"]["resnet_filters"], kernel_size=7, strides=2, padding='same')(inputs)
     x = layers.BatchNormalization()(x)
     x = layers.ReLU()(x)
     x = layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(x)
 
     # Residual blocks with skip connections
-    for _ in range(config["resnet_config"]["resnet_blocks"]):
+    for _ in range(config["resnet"]["resnet_blocks"]):
         shortcut = x  # Preserve the input for the skip connection
-        x = layers.Conv1D(config["resnet_config"]["resnet_filters"], kernel_size=config["resnet_config"]["resnet_kernel_size"], padding='same', activation='relu')(x)
+        x = layers.Conv1D(config["resnet"]["resnet_filters"], kernel_size=config["resnet"]["resnet_kernel_size"], padding='same', activation='relu')(x)
         x = layers.BatchNormalization()(x)
-        x = layers.Conv1D(config["resnet_config"]["resnet_filters"], kernel_size=config["resnet_config"]["resnet_kernel_size"], padding='same')(x)
+        x = layers.Conv1D(config["resnet"]["resnet_filters"], kernel_size=config["resnet"]["resnet_kernel_size"], padding='same')(x)
         x = layers.BatchNormalization()(x)
         # Adjust dimensions of the shortcut if needed
         if shortcut.shape[-1] != x.shape[-1]:
-            shortcut = layers.Conv1D(config["resnet_config"]["resnet_filters"], kernel_size=1, padding='same')(shortcut)
+            shortcut = layers.Conv1D(config["resnet"]["resnet_filters"], kernel_size=1, padding='same')(shortcut)
         # Add the skip connection
         x = layers.add([x, shortcut])
         x = layers.ReLU()(x)
@@ -54,15 +54,15 @@ def build_resnet_model(input_shape, config, num_classes):
     # Global average pooling to summarize features
     x = layers.GlobalAveragePooling1D()(x)
     # Fully connected layer for feature extraction
-    x = layers.Dense(config["general_config"]["dense_units"], activation='relu')(x)
+    x = layers.Dense(config["general"]["dense_units"], activation='relu')(x)
     # Dropout layer to prevent overfitting
-    x = layers.Dropout(config["general_config"]["dropout_rate"])(x)
+    x = layers.Dropout(config["general"]["dropout_rate"])(x)
     # Output layer for classification
     outputs = layers.Dense(num_classes, activation='softmax')(x)
 
     # Compile the model
     model = models.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=optimizers.Adam(learning_rate=config["general_config"]["learning_rate"]),
+    model.compile(optimizer=optimizers.Adam(learning_rate=config["general"]["learning_rate"]),
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
     return model
@@ -73,34 +73,34 @@ def build_transformer_model(input_shape, config, num_classes):
     # Input layer
     inputs = layers.Input(shape=input_shape)
     # Dense layer for embedding
-    x = layers.Dense(config["transformer_config"]["transformer_ff_dim"], activation='relu')(inputs)
+    x = layers.Dense(config["transformer"]["transformer_ff_dim"], activation='relu')(inputs)
 
     # Transformer encoder layers
-    for _ in range(config["transformer_config"]["transformer_layers"]):
+    for _ in range(config["transformer"]["transformer_layers"]):
         # Multi-head attention layer
         attention_output = layers.MultiHeadAttention(
-            num_heads=config["transformer_config"]["transformer_heads"],
-            key_dim=config["transformer_config"]["transformer_ff_dim"] // config["transformer_config"]["transformer_heads"]
+            num_heads=config["transformer"]["transformer_heads"],
+            key_dim=config["transformer"]["transformer_ff_dim"] // config["transformer"]["transformer_heads"]
         )(x, x)
         # Add and normalize for stability
-        attention_output = layers.LayerNormalization(epsilon=config["transformer_config"]["transformer_epsilon"])(attention_output + x)
+        attention_output = layers.LayerNormalization(epsilon=config["transformer"]["transformer_epsilon"])(attention_output + x)
         # Feed-forward network with residual connection
-        ffn_output = layers.Dense(config["transformer_config"]["transformer_ff_dim"], activation='relu')(attention_output)
-        ffn_output = layers.Dense(config["transformer_config"]["transformer_ff_dim"])(ffn_output)
-        x = layers.LayerNormalization(epsilon=config["transformer_config"]["transformer_epsilon"])(ffn_output + attention_output)
+        ffn_output = layers.Dense(config["transformer"]["transformer_ff_dim"], activation='relu')(attention_output)
+        ffn_output = layers.Dense(config["transformer"]["transformer_ff_dim"])(ffn_output)
+        x = layers.LayerNormalization(epsilon=config["transformer"]["transformer_epsilon"])(ffn_output + attention_output)
 
     # Pooling layers for fixed-size output
     x = layers.GlobalAveragePooling1D()(x)
     # Fully connected layer for feature extraction
-    x = layers.Dense(config["general_config"]["dense_units"], activation='relu')(x)
+    x = layers.Dense(config["general"]["dense_units"], activation='relu')(x)
     # Dropout layer for regularization
-    x = layers.Dropout(config["general_config"]["dropout_rate"])(x)
+    x = layers.Dropout(config["general"]["dropout_rate"])(x)
     # Output layer for classification
     outputs = layers.Dense(num_classes, activation='softmax')(x)
 
     # Compile the model
     model = models.Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer=optimizers.Adam(learning_rate=config["general_config"]["learning_rate"]),
+    model.compile(optimizer=optimizers.Adam(learning_rate=config["general"]["learning_rate"]),
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
     return model
@@ -121,7 +121,7 @@ def build_resnet18_model(input_shape, config, num_classes):
         keras.Model: Compiled ResNet18 model.
     """
     inputs = layers.Input(shape=input_shape)
-    x = layers.Conv2D(config["resnet18_config"]["initial_filters"], kernel_size=7, strides=2, padding='same')(inputs)
+    x = layers.Conv2D(config["resnet18"]["initial_filters"], kernel_size=7, strides=2, padding='same')(inputs)
     x = layers.BatchNormalization()(x)
     x = layers.ReLU()(x)
 
@@ -146,7 +146,7 @@ def build_resnet18_model(input_shape, config, num_classes):
     outputs = layers.Dense(num_classes, activation='softmax')(x)
 
     model = models.Model(inputs, outputs)
-    model.compile(optimizer=optimizers.SGD(learning_rate=config["general_config"]["learning_rate"], momentum=config["resnet18_config"]["momentum"]),
+    model.compile(optimizer=optimizers.SGD(learning_rate=config["general"]["learning_rate"], momentum=config["resnet18"]["momentum"]),
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])
     return model
@@ -214,8 +214,8 @@ def train_model(model_name, X_train, y_train, X_test, y_test, config, class_to_i
         model = build_resnet18_model(X_train.shape[1:], config, num_classes)
 
 
-    early_stopping = EarlyStopping(monitor='val_loss', patience=config["general_config"]["patience"], restore_best_weights=True)
-    history = model.fit(X_train, y_train, epochs=config["general_config"]["epochs"], batch_size=config["general_config"]["batch_size"], validation_data=(X_test, y_test), callbacks=[early_stopping])
+    early_stopping = EarlyStopping(monitor='val_loss', patience=config["general"]["patience"], restore_best_weights=True)
+    history = model.fit(X_train, y_train, epochs=config["general"]["epochs"], batch_size=config["general"]["batch_size"], validation_data=(X_test, y_test), callbacks=[early_stopping])
     # Evaluate model
     loss, accuracy = model.evaluate(X_test, y_test)
     print(f"Accuracy: {accuracy * 100:.2f}%")

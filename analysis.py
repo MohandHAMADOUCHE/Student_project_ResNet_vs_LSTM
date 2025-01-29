@@ -14,7 +14,7 @@ import shutil
 import pickle
 from training import load_and_compile_model, load_training_data
 
-# Salvar uma figura na lista de imagens
+# Save a figure to the image list
 def save_figure_to_list(image_list):
     import io
     from PIL import Image
@@ -54,9 +54,9 @@ def display_images(image_list):
     update_image()
     plt.show()
 
-# Avaliar desempenho do modelo
+# Evaluate model performance
 def evaluate_model_performance(y_true, y_pred, class_names):
-    report = classification_report(y_true, y_pred, target_names=class_names, output_dict=True)
+    report = classification_report(y_true, y_pred, target_names=class_names, output_dict=True, zero_division=0)
     y_true_binary = to_categorical(y_true, num_classes=len(class_names))
     y_pred_binary = to_categorical(y_pred, num_classes=len(class_names))
     
@@ -66,7 +66,7 @@ def evaluate_model_performance(y_true, y_pred, class_names):
         auc_score = None
     return report, auc_score
 
-# Plotar métricas comparativas entre modelos selecionados
+# Plot comparative metrics between selected models
 def plot_metrics_comparison(reports, auc_scores, class_names, image_list):
     metrics = ['precision', 'recall', 'f1-score']
     
@@ -82,7 +82,7 @@ def plot_metrics_comparison(reports, auc_scores, class_names, image_list):
         plt.legend()
         save_figure_to_list(image_list)
     
-    # Comparação do AUC
+    # AUC comparison
     plt.figure(figsize=(6, 6))
     for model_name, auc_score in auc_scores.items():
         plt.bar(model_name, auc_score)
@@ -90,7 +90,7 @@ def plot_metrics_comparison(reports, auc_scores, class_names, image_list):
     plt.ylabel("AUC Score")
     save_figure_to_list(image_list)
 
-# Plotar matriz de confusão
+# Plot confusion matrix
 def plot_confusion_matrix(y_true, y_pred, class_names, method, image_list):
     cm = confusion_matrix(y_true, y_pred)
     plt.figure(figsize=(10, 8))
@@ -98,12 +98,12 @@ def plot_confusion_matrix(y_true, y_pred, class_names, method, image_list):
     plt.title(f"Confusion Matrix - {method}")
     save_figure_to_list(image_list)
 
-# Plotar curvas ROC para classificação multiclasse
+# Plot ROC curves for multiclass classification
 def plot_multiclass_roc(y_true, y_pred, class_names, method, image_list):
     y_true_bin = to_categorical(y_true, num_classes=len(class_names))
     y_pred_bin = to_categorical(y_pred, num_classes=len(class_names))
     plt.figure(figsize=(10, 8))
-    colors = cycle(plt.cm.tab10.colors)  # Usando cores genéricas do matplotlib
+    colors = cycle(plt.cm.tab10.colors)  # Using matplotlib's default colors
     for i, color in zip(range(len(class_names)), colors):
         fpr, tpr, _ = roc_curve(y_true_bin[:, i], y_pred_bin[:, i])
         roc_auc = auc(fpr, tpr)
@@ -113,38 +113,38 @@ def plot_multiclass_roc(y_true, y_pred, class_names, method, image_list):
     plt.legend(loc="lower right")
     save_figure_to_list(image_list)
 
-# Plotar comparação de desempenho entre modelos
+# Plot performance comparison between models
 def plot_comparison(training_times, classification_times, histories, image_list, config):
     """
-    Compara desempenho de modelos selecionados com base em métricas de treino, validação, 
-    tempo de treinamento e classificação.
+    Compare the performance of selected models based on training, validation metrics,
+    training time, and classification time.
     """
-    # Comparar precisão (accuracy) entre os modelos
+    # Compare accuracy between models
     plt.figure(figsize=(14, 6))
-    colors = cycle(plt.cm.tab10.colors)  # Usar ciclo de cores
+    colors = cycle(plt.cm.tab10.colors)  # Using color cycle
     for model_name, is_selected in config["selected_models"].items():
         if not is_selected:
             continue
         
-        # Obter métricas do modelo
+        # Get model metrics
         model_history = histories.get(model_name, {})
         training_accuracy = model_history.get('accuracy', [])
         validation_accuracy = model_history.get('val_accuracy', [])
         epochs = range(1, len(training_accuracy) + 1)
 
-        # Plotar treino e validação
+        # Plot training and validation
         color = next(colors)
         plt.plot(epochs, training_accuracy, label=f'{model_name} Training', color=color)
         plt.plot(epochs, validation_accuracy, label=f'{model_name} Validation', linestyle='--', color=color)
     
-    # Configuração do gráfico
+    # Graph configuration
     plt.title('Accuracy Comparison')
     plt.xlabel('Epochs')
     plt.ylabel('Accuracy')
     plt.legend(loc="best")
     save_figure_to_list(image_list)
 
-    # Comparar tempo de treinamento (apenas modelos selecionados)
+    # Compare training time (only selected models)
     plt.figure(figsize=(8, 6))
     selected_training_times = {key: value for key, value in training_times.items() if config["selected_models"].get(key, False)}
     colors = cycle(plt.cm.tab10.colors)
@@ -153,7 +153,7 @@ def plot_comparison(training_times, classification_times, histories, image_list,
     plt.ylabel('Time (seconds)')
     save_figure_to_list(image_list)
 
-    # Comparar tempo de classificação (apenas modelos selecionados)
+    # Compare classification time (only selected models)
     plt.figure(figsize=(8, 6))
     selected_classification_times = {key: value for key, value in classification_times.items() if config["selected_models"].get(key, False)}
     colors = cycle(plt.cm.tab10.colors)
@@ -162,7 +162,7 @@ def plot_comparison(training_times, classification_times, histories, image_list,
     plt.ylabel('Time (seconds)')
     save_figure_to_list(image_list)
 
-# Função principal para executar a análise
+# Main function to execute the analysis
 def do_all_analysis(X_test, y_test, config, class_to_index, image_list):
     y_true = y_test.argmax(axis=1) if len(y_test.shape) > 1 else y_test
     reports, auc_scores, classification_times = {}, {}, {}
@@ -172,7 +172,7 @@ def do_all_analysis(X_test, y_test, config, class_to_index, image_list):
             continue
         print(f"Loading model: {model_name}")
         model = load_and_compile_model(f"{model_name}_model.keras")
-        # Começar a classificação para cada modelo individualmente
+        # Start classification for each model individually
         start_classification = time.time()
         y_pred = model.predict(X_test).argmax(axis=1)
         classification_times[model_name] = time.time() - start_classification
@@ -185,27 +185,24 @@ def do_all_analysis(X_test, y_test, config, class_to_index, image_list):
         plot_confusion_matrix(y_true, y_pred, class_names, model_name, image_list)
         plot_multiclass_roc(y_true, y_pred, class_names, model_name, image_list)
 
-    # Plotar métricas comparativas entre modelos
+    # Plot comparative metrics between models
     plot_metrics_comparison(reports, auc_scores, [f"Class {i}" for i in range(len(class_to_index))], image_list)
     
-    # Plotar comparação de desempenho (tempo de treinamento, tempo de classificação)
+    # Plot performance comparison (training time, classification time)
     training_times, histories, _ = load_training_data()
     plot_comparison(training_times, classification_times, histories, image_list, config)
-    
-    #save_analysis_results(reports, training_times, classification_times, auc_scores, image_list, model_paths, config)
     
     print("Analysis complete. Displaying results...")
     display_images(image_list)
 
-
-# Função para criar o diretório
+# Function to create the directory
 def create_model_directory(base_dir="Models"):
     timestamp = datetime.now().strftime("%Y%m%d%H%M")
     path = os.path.join(base_dir, timestamp)
     os.makedirs(path, exist_ok=True)
     return path
 
-# Função para copiar os modelos para o diretório da análise
+# Function to copy models to the analysis directory
 def copy_models_to_directory(model_paths, target_directory):
     models_dir = os.path.join(target_directory, "models")
     os.makedirs(models_dir, exist_ok=True)
@@ -214,46 +211,46 @@ def copy_models_to_directory(model_paths, target_directory):
         shutil.copy(src_path, dest_path)
         print(f"Copied {src_path} to {dest_path}")
 
-# Função para gerar o relatório em PDF
+# Function to generate the PDF report
 def generate_pdf_report(directory, model_reports, training_times, classification_times, auc_scores, images, config):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # Adicionar página inicial com título
+    # Add initial page with title
     pdf.add_page()
     pdf.set_font("Arial", size=14, style="B")
     pdf.cell(200, 10, txt="Model Performance Report", ln=True, align="C")
     pdf.ln(10)
 
-    # Adicionar dados de treinamento e classificação
+    # Add training and classification times
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt="Training and Classification Times", ln=True, align="L")
     for model, time in training_times.items():
         pdf.cell(200, 8, txt=f"Model: {model} | Training Time: {time:.2f}s | Classification Time: {classification_times.get(model, 0):.2f}s", ln=True)
     pdf.ln(10)
 
-    # Adicionar pontuação AUC
+    # Add AUC scores
     pdf.cell(200, 10, txt="AUC Scores", ln=True, align="L")
     for model, auc in auc_scores.items():
         pdf.cell(200, 8, txt=f"Model: {model} | AUC Score: {auc:.2f}", ln=True)
     pdf.ln(10)
 
-    # Adicionar relatórios detalhados de cada modelo
+    # Add detailed reports for each model
     for model, report in model_reports.items():
         pdf.add_page()
         pdf.set_font("Arial", size=12, style="B")
         pdf.cell(200, 10, txt=f"Model: {model}", ln=True)
         pdf.set_font("Arial", size=10)
         for class_name, metrics in report.items():
-            if isinstance(metrics, dict):  # Classes individuais
+            if isinstance(metrics, dict):  # Individual classes
                 pdf.cell(200, 8, txt=f"Class: {class_name}", ln=True)
                 for metric, value in metrics.items():
                     pdf.cell(200, 8, txt=f"  {metric}: {value:.2f}", ln=True)
-            else:  # Métricas gerais como 'accuracy'
+            else:  # General metrics like 'accuracy'
                 pdf.cell(200, 8, txt=f"{class_name}: {metrics:.2f}", ln=True)
         pdf.ln(5)
 
-    # Adicionar imagens geradas
+    # Add generated images
     for idx, img_array in enumerate(images):
         pdf.add_page()
         pdf.set_font("Arial", size=12, style="B")
@@ -261,9 +258,9 @@ def generate_pdf_report(directory, model_reports, training_times, classification
         image_path = os.path.join(directory, f"figure_{idx + 1}.png")
         Image.fromarray(img_array).save(image_path)
         pdf.image(image_path, x=10, y=30, w=180)
-        pdf.ln(85)  # Espaço para evitar sobreposição
+        pdf.ln(85)  # Space to avoid overlap
 
-    # Adicionar configurações no PDF
+    # Add configuration settings in the PDF
     pdf.add_page()
     pdf.set_font("Arial", size=12, style="B")
     pdf.cell(200, 10, txt="Configuration Settings", ln=True)
@@ -277,30 +274,30 @@ def generate_pdf_report(directory, model_reports, training_times, classification
             pdf.cell(200, 8, txt=f"{key}: {value}", ln=True)
     pdf.ln(5)
 
-    # Salvar o PDF
+    # Save the PDF
     pdf_path = os.path.join(directory, "model_report.pdf")
     pdf.output(pdf_path)
     print(f"PDF report saved at: {pdf_path}")
 
-# Função principal para salvar os dados e relatório
+# Main function to save the data and report
 def save_analysis_results(model_reports, training_times, classification_times, auc_scores, images, model_paths, config, training_data_file="training_times.json"):
     directory = create_model_directory()
 
-    # Copiar modelos para o diretório
+    # Copy models to the directory
     copy_models_to_directory(model_paths, directory)
 
-    # Salvar arquivo training_times.json no diretório
+    # Save training_times.json file in the directory
     with open(os.path.join(directory, "training_times.json"), "w") as json_file:
         json.dump(training_times, json_file, indent=4)
     
-    # Salvar os relatórios de modelos no subdiretório
+    # Save model reports in the subdirectory
     models_dir = os.path.join(directory, "models")
     for model_name, model in model_reports.items():
         model_path = os.path.join(models_dir, f"{model_name}.pkl")
         with open(model_path, "wb") as model_file:
             pickle.dump(model, model_file)
 
-    # Gerar e salvar o relatório em PDF
+    # Generate and save the PDF report
     generate_pdf_report(directory, model_reports, training_times, classification_times, auc_scores, images, config)
 
     print(f"Results saved in directory: {directory}")

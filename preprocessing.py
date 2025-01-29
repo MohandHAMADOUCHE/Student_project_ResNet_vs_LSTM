@@ -11,6 +11,7 @@ from gammatone.gtgram import gtgram
 from concurrent.futures import ThreadPoolExecutor
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import NeighborhoodComponentsAnalysis
+from tensorflow.keras.models import load_model  # type: ignore
 
 # Salvar uma figura na lista de imagens
 def save_figure_to_list(image_list):
@@ -23,6 +24,66 @@ def save_figure_to_list(image_list):
     image_list.append(np.array(image))
     buf.close()
     plt.close()
+
+import numpy as np
+def classify_audio(file_path, config, model_paths, class_mapping):
+    # Extraindo as características do áudio
+    features = extract_features(
+        file_path=file_path,
+        config=config,
+        frame_length=config["general"]["frame_length"],
+        hop_length=config["general"]["hop_length"],
+        max_frames=config["general"]["max_frames"],
+        n_features=config["general"]["n_features"],
+        show_example=config["general"].get("visual_feedback", False),
+    )
+
+    print(f"Features shape: {features.shape}")  # Verificando a forma das características
+
+    # Garantir que as características tenham o formato reduzido esperado
+    # Aqui assumimos que o PCA reduziu para 2 componentes
+    features_flattened = features.flatten()[:2]  # Pegando apenas as duas primeiras características
+    features_resized = features_flattened.reshape(1, 2, 1)  # Redimensionando para o formato (1, 2, 1)
+
+    print(f"Features resized shape (ajustado): {features_resized.shape}")  # Verifique a nova forma
+
+    predictions = []  
+    model_results = {}
+
+    for model_name, model_path in model_paths.items():
+        print(f"Modelo: {model_name}")
+
+        model = load_model(model_path)
+
+        # Predição com o modelo
+        prediction = model.predict(features_resized)
+        print(f"Prediction: {prediction}")  # Verificando a predição
+
+        # Identificando a classe predita
+        prediction_index = prediction.argmax(axis=-1)[0]
+        predicted_class = [key for key, value in class_mapping.items() if value == prediction_index][0]
+        confidence = prediction.max()  # Confiança na predição
+
+        predictions.append(predicted_class)
+        model_results[model_name] = {
+            "predicted_class": predicted_class,
+            "confidence": confidence,
+        }
+
+        print(f"Predição para {model_name}: {predicted_class} com confiança {confidence:.2f}")
+
+    # Obtendo a classe final pela moda (mais comum)
+    unique_classes, counts = np.unique(predictions, return_counts=True)
+    most_common_class = unique_classes[np.argmax(counts)]
+
+    print(f"Predição final (Moda): {most_common_class}")  # Mostrando a predição final
+
+    return {
+        "model_results": model_results,
+        "final_prediction": most_common_class,
+    }
+
+
 
 def plot_spectrograms_per_class(data_path, class_mapping, image_list):
     """
@@ -75,7 +136,7 @@ def preprocess_audio(file_path, config, image_list, frame_length=2048, hop_lengt
     Returns:
         tuple: Emphasized audio, framed and windowed signal, sample rate.
     """
-    audio, sample_rate = librosa.load(file_path, sr=None, duration=config["general_config"]["audio_duration"])
+    audio, sample_rate = librosa.load(file_path, sr=None, duration=config["general"]["audio_duration"])
 
     # Apply pre-emphasis
     pre_emphasis = 0.97
@@ -176,21 +237,34 @@ def extract_features(file_path, config, image_list=[], frame_length=2048, hop_le
 
     # Extract basic features
     basic_features = []
+    feature_names = []  # Para rastrear o nome das features básicas
     if config["preprocessing_methods"].get("MFCC", False):
         mfcc = pad_or_truncate(librosa.feature.mfcc(y=emphasized_audio, sr=sample_rate, n_mfcc=n_features), max_frames)
         basic_features.append(mfcc)
+        feature_names.append("MFCC")
         if show_example:
             plot_feature(mfcc, sample_rate, "MFCC", image_list)
 
     if config["preprocessing_methods"].get("GFCC", False):
         gfcc = pad_or_truncate(compute_gfcc(emphasized_audio, sample_rate), max_frames)
         basic_features.append(gfcc)
+        feature_names.append("GFCC")
         if show_example:
             plot_feature(gfcc, sample_rate, "GFCC", image_list)
 
     if config["preprocessing_methods"].get("CQT", False):
-        cqt = pad_or_truncate(np.abs(librosa.cqt(y=emphasized_audio, sr=sample_rate, n_bins=84)), max_frames)
+        cqt = pad_or_truncate(
+            np.abs(librosa.cqt(
+                y=emphasized_audio,
+                sr=sample_rate,
+                n_bins=60,  # Reduzido para evitar exceder Nyquist
+                bins_per_octave=12,  # Número de bins por oitava
+                fmin=librosa.note_to_hz('C2'),  # Frequência mínima ajustada
+            )),
+            max_frames
+        )
         basic_features.append(cqt)
+        feature_names.append("CQT")
         if show_example:
             plot_feature(cqt, sample_rate, "CQT", image_list)
 
@@ -200,6 +274,7 @@ def extract_features(file_path, config, image_list=[], frame_length=2048, hop_le
             max_frames,
         )
         basic_features.append(lofar)
+        feature_names.append("LOFAR")
         if show_example:
             plot_feature(lofar, sample_rate, "LOFAR", image_list)
 
@@ -211,11 +286,11 @@ def extract_features(file_path, config, image_list=[], frame_length=2048, hop_le
     # Extract delta features
     delta_features = []
     if config["preprocessing_methods"].get("DELTAS", False):
-        for feature in basic_features:
+        for feature, name in zip(basic_features, feature_names):
             delta = pad_or_truncate(librosa.feature.delta(feature), max_frames)
             delta_features.append(delta)
             if show_example:
-                plot_feature(delta, sample_rate, "Delta Features", image_list)
+                plot_feature(delta, sample_rate, f"Delta Features ({name})", image_list)
 
     # Combine delta features
     combined_delta_features = np.concatenate(delta_features, axis=0) if delta_features else None
@@ -254,7 +329,7 @@ def reduce_and_visualize_with_nca(features, labels, config, image_list, n_compon
     flattened_features = features.reshape(num_samples, num_features)
 
     # Apply NCA
-    nca = NeighborhoodComponentsAnalysis(n_components=n_components, random_state=config["general_config"]["random_state"])
+    nca = NeighborhoodComponentsAnalysis(n_components=n_components, random_state=config["general"]["random_state"])
     reduced_features = nca.fit_transform(flattened_features, labels)
 
     # Visualize reduced features
@@ -312,18 +387,18 @@ def load_dataset(image_list, config, frame_length=2048, hop_length=512, max_fram
     """
 
     X, y = [], []
-    classes = sorted(os.listdir(config["general_config"]["data_path"]))  # List all class folders
+    classes = sorted(os.listdir(config["general"]["data_path"]))  # List all class folders
     class_to_index = {cls_name: idx for idx, cls_name in enumerate(classes)}  # Map class names to indices
     
-    if config["general_config"]["visual_feedback"]:
-        plot_spectrograms_per_class(config["general_config"]["data_path"], class_to_index, image_list)
-        example_audio_path = os.path.join(config["general_config"]["data_path"], os.listdir(config["general_config"]["data_path"])[0], os.listdir(os.path.join(config["general_config"]["data_path"], os.listdir(config["general_config"]["data_path"])[0]))[0])
+    if config["general"]["visual_feedback"]:
+        plot_spectrograms_per_class(config["general"]["data_path"], class_to_index, image_list)
+        example_audio_path = os.path.join(config["general"]["data_path"], os.listdir(config["general"]["data_path"])[0], os.listdir(os.path.join(config["general"]["data_path"], os.listdir(config["general"]["data_path"])[0]))[0])
         preprocess_audio(example_audio_path, config, image_list, show_example=True)
         extract_features(example_audio_path, config, image_list, show_example=True)
 
     tasks = []
     for cls_name in classes:
-        cls_path = os.path.join(config["general_config"]["data_path"], cls_name)
+        cls_path = os.path.join(config["general"]["data_path"], cls_name)
         if os.path.isdir(cls_path):  # Check if it is a directory
             for file_name in os.listdir(cls_path):  # List all files in the class folder
                 file_path = os.path.join(cls_path, file_name)
@@ -339,87 +414,84 @@ def load_dataset(image_list, config, frame_length=2048, hop_length=512, max_fram
 
     return np.array(X), np.array(y), class_to_index
 
+from itertools import combinations, product
 
 def mix_audio_files(file_paths, output_path, sample_rate=22050):
     """
-    Combina múltiplos arquivos de áudio em um único arquivo mixado.
-
-    Args:
-        file_paths (list): Lista de caminhos dos arquivos de áudio.
-        output_path (str): Caminho para salvar o arquivo de áudio mixado.
-        sample_rate (int): Taxa de amostragem dos arquivos de áudio.
-
+    Função para misturar múltiplos arquivos de áudio e salvar o resultado em um novo arquivo.
     """
+    # Carregar os áudios e padronizar a taxa de amostragem
     audios = [librosa.load(file_path, sr=sample_rate)[0] for file_path in file_paths]
-
-    # Garantir que os áudios tenham o mesmo comprimento
+    
+    # Ajustar todos os áudios para o mesmo comprimento (mínimo comprimento encontrado)
     min_length = min(len(audio) for audio in audios)
     audios = [audio[:min_length] for audio in audios]
-
-    # Mixar os áudios
+    
+    # Misturar os áudios (média dos sinais)
     mixed_audio = np.mean(audios, axis=0)
-
-    # Normalizar o áudio mixado
+    
+    # Garantir que os valores estão no intervalo [-1, 1]
     mixed_audio = np.clip(mixed_audio, -1.0, 1.0)
-
-    # Salvar o áudio mixado
+    
+    # Salvar o áudio misturado no arquivo de saída
     sf.write(output_path, mixed_audio, sample_rate)
 
 
 def create_mixed_classes(dataset_path, sample_rate=22050):
     """
-    Gera todas as combinações possíveis de áudios das classes existentes dentro das subpastas do dataset.
-
-    Args:
-        dataset_path (str): Caminho do diretório do dataset.
-        sample_rate (int): Taxa de amostragem dos arquivos de áudio.
+    Função para criar novas classes misturadas a partir de combinações de classes existentes.
     """
+    # Listar as subpastas (classes) dentro do dataset
     class_dirs = [d for d in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, d))]
+    
+    # Contar a quantidade de arquivos em cada classe
     class_file_counts = {cls: len(os.listdir(os.path.join(dataset_path, cls))) for cls in class_dirs}
     max_count = max(class_file_counts.values())
-
-    # Gerar todas as combinações possíveis de 2 a n classes
+    
+    # Criar combinações de classes
     for num_classes in range(2, len(class_dirs) + 1):
         for class_combination in combinations(class_dirs, num_classes):
             combined_class_name = "_".join(class_combination)
             combined_class_dir = os.path.join(dataset_path, combined_class_name)
             os.makedirs(combined_class_dir, exist_ok=True)
-
-            # Carregar arquivos de áudio de cada classe
+            
+            # Obter os arquivos de cada classe na combinação
             class_files = [
                 [os.path.join(dataset_path, class_dir, f) for f in os.listdir(os.path.join(dataset_path, class_dir)) if f.endswith(('.wav', '.mp3'))]
                 for class_dir in class_combination
             ]
-
-            # Limitar o número de combinações ao tamanho da maior classe
-            combined_files = list(combinations(sum(class_files, []), num_classes))
-            random.shuffle(combined_files)
+            
+            # Gerar combinações de arquivos (um de cada classe)
+            combined_files = list(product(*class_files))
+            random.shuffle(combined_files)  # Aleatorizar as combinações
+            
+            # Limitar o número de combinações para o máximo de arquivos em qualquer classe
             limited_combinations = combined_files[:max_count]
-
+            
+            # Misturar os arquivos e salvar o resultado
             for file_paths in limited_combinations:
                 output_file_name = f"mix_{'_'.join([os.path.splitext(os.path.basename(f))[0] for f in file_paths])}.wav"
                 output_file_path = os.path.join(combined_class_dir, output_file_name)
-
                 mix_audio_files(file_paths, output_file_path, sample_rate)
-
+            
             print(f"Combinações salvas em: {combined_class_dir}")
 
 def preprocessing(config, image_list):
     print("Começando preprocessamento...")
 
-    if config["general_config"]["mix_classes"]:
+    if config["general"]["mix_classes"]:
         print("Começando mixagem de classes...")
-        create_mixed_classes(config["general_config"]["data_path"])
+        create_mixed_classes(config["general"]["data_path"])
         print("Mixagem de classes finalizada...")
 
     # Load dataset
-    X, y, class_to_index = load_dataset(image_list, config, save_dir=config["general_config"]["processed_data_path"])
+    X, y, class_to_index = load_dataset(image_list, config, save_dir=config["general"]["processed_data_path"])
 
     # Reduce dimensionality and visualize
     X_reduced = reduce_and_visualize_with_nca(X, y, config, image_list)
 
     # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X_reduced, y, test_size=config["general_config"]["test_size"], random_state=config["general_config"]["random_state"])
+    X_train, X_test, y_train, y_test = train_test_split(X_reduced, y, test_size=config["general"]["test_size"], random_state=config["general"]["random_state"])
 
     X_train = X_train.reshape(X_train.shape[0], 2, 1, 1)
     X_test = X_test.reshape(X_test.shape[0], 2, 1, 1)
@@ -429,13 +501,13 @@ def preprocessing(config, image_list):
 
 def load_preprocessed(config, image_list):
     # Load dataset
-    X, y, class_to_index = load_dataset(image_list, config, save_dir=config["general_config"]["processed_data_path"])
+    X, y, class_to_index = load_dataset(image_list, config, save_dir=config["general"]["processed_data_path"])
 
     # Reduce dimensionality and visualize
-    X_reduced = reduce_and_visualize_with_nca(X, y, config)
+    X_reduced = reduce_and_visualize_with_nca(X, y, config, image_list)
 
     # Train-test split
-    _, X_test, _, y_test = train_test_split(X_reduced, y, test_size=config["general_config"]["test_size"], random_state=config["general_config"]["random_state"])
+    _, X_test, _, y_test = train_test_split(X_reduced, y, test_size=config["general"]["test_size"], random_state=config["general"]["random_state"])
 
     X_test = X_test.reshape(X_test.shape[0], 2, 1, 1)
 
