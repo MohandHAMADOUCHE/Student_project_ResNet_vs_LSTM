@@ -2,32 +2,40 @@ import os
 import shutil
 import pandas as pd
 
-# Caminho do CSV e da pasta raiz do dataset
-csv_path = r"C:\Users\Gustavo\Desktop\UrbanSound8K\metadata\UrbanSound8K.csv"
-audio_root_path = r"C:\Users\Gustavo\Desktop\UrbanSound8K\audio"
+# Chemins des fichiers et répertoires
+csv_path = "/tools/mohand_postdoc/datasets/urban/UrbanSound8K/metadata/UrbanSound8K.csv"
+audio_root_path = "/tools/mohand_postdoc/datasets/urban/UrbanSound8K/audio"
+destination_root_path = "/tools/mohand_postdoc/datasets/urban/UrbanSound8K/classified_audio"  # Dossier de sortie
 
-# Carregar o arquivo CSV
+# Charger le fichier CSV
 df = pd.read_csv(csv_path)
 
-# Processar cada linha no CSV
+# Vérifier et créer le dossier racine de destination
+if not os.path.exists(destination_root_path):
+    os.makedirs(destination_root_path)
+
+# Traiter chaque ligne du fichier CSV
 for _, row in df.iterrows():
     file_name = row["slice_file_name"]
     fold = row["fold"]
+    class_id = row["classID"]  # Identifiant de la classe sonore
+
+    # Chemin du fichier source (dans son dossier "foldX" d'origine)
+    original_path = os.path.join(audio_root_path, f"fold{fold}", file_name)
     
-    # Caminho original e destino do arquivo
-    original_path = os.path.join(audio_root_path, file_name)
-    destination_folder = os.path.join(audio_root_path, f"fold{fold}")
-    destination_path = os.path.join(destination_folder, file_name)
+    # Dossier de destination basé sur la classe sonore
+    class_folder = os.path.join(destination_root_path, f"class_{class_id}")
+    destination_path = os.path.join(class_folder, file_name)
 
-    # Criar a pasta destino se não existir
-    if not os.path.exists(destination_folder):
-        os.makedirs(destination_folder)
+    # Créer le dossier de la classe s'il n'existe pas
+    if not os.path.exists(class_folder):
+        os.makedirs(class_folder)
 
-    # Mover o arquivo para a pasta correspondente
+    # Vérifier si le fichier existe avant de le déplacer
     if os.path.exists(original_path):
         shutil.move(original_path, destination_path)
-        print(f"Movido: {original_path} -> {destination_path}")
+        print(f"✔️ Mové: {original_path} -> {destination_path}")
     else:
-        print(f"Arquivo não encontrado: {original_path}")
+        print(f"❌ Fichier introuvable: {original_path}")
 
-print("Organização concluída!")
+print("✅ Organisation par classe sonore terminée !")

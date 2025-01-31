@@ -41,8 +41,8 @@ def main():
     # Configuration dictionary for model, preprocessing, and training parameters
     config = {
         "general": {
-            "data_path": r"C:\Users\Gustavo\Desktop\UrbanSound8K\organized",
-            "processed_data_path": r"C:\Users\Gustavo\Desktop\UrbanSound8K\processed_features",
+            "data_path": "/tools/mohand_postdoc/datasets/DeepShip_organized_V2", # "/tools/mohand_postdoc/datasets/urban/UrbanSound8K/classified_audio",
+            "processed_data_path": "/tools/mohand_postdoc/datasets/Porcessed_features_integration_v1", #"/tools/mohand_postdoc/datasets/urban/UrbanSound8K/processed_features",
             "epochs": 100,
             "visual_feedback": True,
             "audio_duration": 20,
