@@ -181,18 +181,3 @@ for output_tensor in onnx_model.graph.output:
     print(f"Output Name: {output_name}, Shape: {output_shape}, Type: {onnx.TensorProto.DataType.Name(output_type)}")
 
 
-
-'''
-
-docker run -v /var/run/docker.sock:/var/run/docker.sock \
--v /home/user/models: /home/user/models \
--v /home/user/results:/results --net=host \
-memory-analyzer:latest \
---batch 1,2,4 \
---concurrency 1,2,4 \
---model-names chest_xray,covid19_xray\
---triton-version 20.02-py3 \
---model-folder /home/user/models \
---export --export-path /results/
-
-'''
