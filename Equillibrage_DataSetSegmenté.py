@@ -3,13 +3,13 @@ import os
 import random
 
 # Chemin du dossier contenant les sous-dossiers des classes de navires
-base_path = "/tools/mohand_postdoc/datasets/DeepShip/DeepShip_SegmentsEquilibre"
+base_path = "/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train_DeepShip_Segments_5000"
 
 # Classes de navires
 ship_classes = ["Cargo", "Passengership", "Tanker", "Tug"]
 
 # Nombre de segments à conserver par classe
-target_segments = 12800
+target_segments = 5000
 
 for ship_class in ship_classes:
     class_path = os.path.join(base_path, ship_class)
@@ -30,4 +30,4 @@ for ship_class in ship_classes:
     else:
         print(f"{ship_class}: Déjà à {len(segments)} segments, pas de suppression nécessaire.")
 
-print("Dataset équilibré avec au maximum 12800 segments par classe")
+print("Dataset équilibré avec au maximum 8800 segments par classe")

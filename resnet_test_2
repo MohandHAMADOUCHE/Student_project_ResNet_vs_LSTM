@@ -30,7 +30,7 @@ def preprocess_audio(file_path, frame_length=2048, hop_length=512, show_example=
     Returns:
         tuple: Emphasized audio, framed and windowed signal, sample rate.
     """
-    audio, sample_rate = librosa.load(file_path, sr=None, duration=30.0)
+    audio, sample_rate = librosa.load(file_path, sr=None)
 
     # Apply pre-emphasis
     pre_emphasis = 0.97
@@ -113,13 +113,21 @@ def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=10
 
     # Extract features
     mfcc = librosa.feature.mfcc(y=emphasized_audio, sr=sample_rate, n_mfcc=n_features)
+    print("mfcc", mfcc.shape)
     gfcc = compute_gfcc(emphasized_audio, sample_rate)
+    print("gfcc", gfcc.shape)
     cqt = np.abs(librosa.cqt(y=emphasized_audio, sr=sample_rate, n_bins=84))
+    print("cqt", cqt.shape)
     lofar = librosa.amplitude_to_db(np.abs(librosa.stft(emphasized_audio, n_fft=frame_length))[:n_features, :], ref=np.max)
+    print("lofar", lofar.shape)
     delta_mfcc = librosa.feature.delta(mfcc)
+    print("delta_mfcc", delta_mfcc.shape)
     delta_gfcc = librosa.feature.delta(gfcc)
+    print("delta_gfcc", delta_gfcc.shape)
     delta_cqt = librosa.feature.delta(cqt)
+    print("delta_cqt", delta_cqt.shape)
     delta_lofar = librosa.feature.delta(lofar)
+    print("delta_lofar", delta_lofar.shape)
 
     # Pad or truncate features
     def pad_or_truncate(feature, max_frames):
@@ -130,6 +138,8 @@ def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=10
         return feature
 
     mfcc = pad_or_truncate(mfcc, max_frames)
+   # mfcc.shape
+
     gfcc = pad_or_truncate(gfcc, max_frames)
     cqt = pad_or_truncate(cqt, max_frames)
     lofar = pad_or_truncate(lofar, max_frames)
@@ -140,9 +150,12 @@ def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=10
 
     # Fuse features
     mgcl = np.concatenate([mfcc, gfcc, cqt, lofar], axis=0)
+    print("mgcl", mgcl.shape)
     delta_mgcl = np.concatenate([delta_mfcc, delta_gfcc, delta_cqt, delta_lofar], axis=0)
+    print("delta_mgcl", delta_mgcl.shape)
     fused_features = np.concatenate([mgcl, delta_mgcl], axis=0)
-
+    print("fused_features", fused_features.shape)
+    
     # Save features
     if save_path:
         np.save(save_path, fused_features)
@@ -165,40 +178,93 @@ def extract_features(file_path, frame_length=2048, hop_length=512, max_frames=10
 
     return fused_features
 
-def reduce_and_visualize_with_nca(features, labels, n_components=2):
+
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.neighbors import NeighborhoodComponentsAnalysis
+
+def reduce_and_visualize_with_nca(features, labels, threshold=0.3, chunk_size=5000):
     """
-    Reduces dimensionality using NCA and visualizes the result.
-
-    Args:
-        features (np.ndarray): Input features.
-        labels (np.ndarray): Corresponding labels.
-        n_components (int): Number of components for NCA.
-
-    Returns:
-        np.ndarray: Reduced features.
+    Filters features based on their importance weights using NCA and a threshold, with block processing.
+    ... (code from previous response) ...
     """
-    print("Reducing dimensionality with NCA...")
+    print("Filtering features based on threshold using NCA...")
 
-    # Flatten features for NCA
-    num_samples = features.shape[0]
-    num_features = np.prod(features.shape[1:])
-    flattened_features = features.reshape(num_samples, num_features)
+    num_samples, num_features, num_frames = features.shape
+    print(f"Input shape: {features.shape}")
 
-    # Apply NCA
-    nca = NeighborhoodComponentsAnalysis(n_components=n_components, random_state=42)
-    reduced_features = nca.fit_transform(flattened_features, labels)
+    # Initialize variables for storing results
+    filtered_chunks = []
+    nca = None  # Will hold the last trained NCA model
 
-    # Visualize reduced features
-    plt.figure(figsize=(8, 6))
-    scatter = plt.scatter(reduced_features[:, 0], reduced_features[:, 1], c=labels, cmap='viridis', alpha=0.8)
-    plt.colorbar(scatter, label='Classes')
-    plt.title("Feature Screening Diagram (MGCL-Delta)")
-    plt.xlabel("NCA Dimension 1")
-    plt.ylabel("NCA Dimension 2")
+    # Process the data in chunks
+    for i in range(0, num_samples, chunk_size):
+        print(f"Processing block {i // chunk_size + 1}...")
+        start = i
+        end = min(i + chunk_size, num_samples)
+        
+        # Extract the current chunk of data
+        chunk_features = features[start:end]  # Shape: (chunk_size, num_features, num_frames)
+        chunk_labels = labels[start:end]
+
+        # Vérification de la diversité des labels
+        unique_labels = np.unique(chunk_labels)
+        print(f"Unique labels in block {i // chunk_size + 1}: {unique_labels}")
+        if len(unique_labels) <= 1:
+            print("Warning: Only one label in this block!")
+
+        # Collapse the temporal dimension (frames) by averaging across frames
+        mean_chunk_features = np.mean(chunk_features, axis=2)  # Shape: (chunk_size, num_features)
+
+        # Normaliser les caractéristiques
+        scaler = StandardScaler()
+        mean_chunk_features = scaler.fit_transform(mean_chunk_features)
+
+
+        # Apply NCA to learn feature weights for the current block
+        nca = NeighborhoodComponentsAnalysis(random_state=42)
+        
+        try:
+            nca.fit(mean_chunk_features, chunk_labels)
+        except MemoryError:
+            print("MemoryError: Reduce the dataset size or optimize memory usage.")
+            return None, None
+
+        print("nca.components_:", nca.components_)  # Ajout de cette ligne
+
+        # Extract feature weights (coefficients of the linear transformation)
+        feature_weights = np.linalg.norm(nca.components_, axis=0)  # Shape: (num_features,)
+
+        # Screen features based on the threshold
+        important_features_mask = feature_weights >= threshold
+        filtered_chunk = chunk_features[:, important_features_mask, :]  # Keep all frames
+
+        print(f"Block {i // chunk_size + 1}:")
+        print(f" - Number of features before filtering: {num_features}")
+        print(f" - Number of features after filtering: {filtered_chunk.shape[1]}")
+
+        # Append filtered chunk to results
+        filtered_chunks.append(filtered_chunk)
+
+    # Combine all filtered chunks into a single array
+    final_filtered_features = np.vstack(filtered_chunks)
+
+    # Visualize feature weights (optional, based on the last block)
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(len(feature_weights)), feature_weights, 'ro')  # Changed to scatter plot with red circles
+    plt.axhline(y=threshold, color='red', linestyle='--', label=f'Threshold = {threshold}')
+    plt.title("Feature Weights (NCA)")
+    plt.xlabel("Feature Index")
+    plt.ylabel("Weight")
+    plt.legend()
     plt.tight_layout()
     plt.show()
 
-    return reduced_features
+    return final_filtered_features, nca
+
+
+
 
 # ======================
 # Model Construction
@@ -309,139 +375,75 @@ def load_dataset(dataset_path, frame_length=2048, hop_length=512, max_frames=100
     return np.array(X), np.array(y), class_to_index
 
 
-import soundfile as sf
-from itertools import combinations
-import random
-
-
-import os
-import numpy as np
-import librosa
-import soundfile as sf
-from itertools import chain, combinations
-import random
-
-
-def mix_audio_files(file_paths, output_path, sample_rate=22050):
-    """
-    Combina múltiplos arquivos de áudio em um único arquivo mixado.
-
-    Args:
-        file_paths (list): Lista de caminhos dos arquivos de áudio.
-        output_path (str): Caminho para salvar o arquivo de áudio mixado.
-        sample_rate (int): Taxa de amostragem dos arquivos de áudio.
-
-    """
-    audios = [librosa.load(file_path, sr=sample_rate)[0] for file_path in file_paths]
-
-    # Garantir que os áudios tenham o mesmo comprimento
-    min_length = min(len(audio) for audio in audios)
-    audios = [audio[:min_length] for audio in audios]
-
-    # Mixar os áudios
-    mixed_audio = np.mean(audios, axis=0)
-
-    # Normalizar o áudio mixado
-    mixed_audio = np.clip(mixed_audio, -1.0, 1.0)
-
-    # Salvar o áudio mixado
-    sf.write(output_path, mixed_audio, sample_rate)
-
-
-def create_mixed_classes(dataset_path, sample_rate=22050):
-    """
-    Gera todas as combinações possíveis de áudios das classes existentes dentro das subpastas do dataset.
-
-    Args:
-        dataset_path (str): Caminho do diretório do dataset.
-        sample_rate (int): Taxa de amostragem dos arquivos de áudio.
-    """
-    class_dirs = [d for d in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, d))]
-    class_file_counts = {cls: len(os.listdir(os.path.join(dataset_path, cls))) for cls in class_dirs}
-    max_count = max(class_file_counts.values())
-
-    # Gerar todas as combinações possíveis de 2 a n classes
-    for num_classes in range(2, len(class_dirs) + 1):
-        for class_combination in combinations(class_dirs, num_classes):
-            combined_class_name = "_".join(class_combination)
-            combined_class_dir = os.path.join(dataset_path, combined_class_name)
-            os.makedirs(combined_class_dir, exist_ok=True)
-
-            # Carregar arquivos de áudio de cada classe
-            class_files = [
-                [os.path.join(dataset_path, class_dir, f) for f in os.listdir(os.path.join(dataset_path, class_dir)) if f.endswith(('.wav', '.mp3'))]
-                for class_dir in class_combination
-            ]
-
-            # Limitar o número de combinações ao tamanho da maior classe
-            combined_files = list(combinations(sum(class_files, []), num_classes))
-            random.shuffle(combined_files)
-            limited_combinations = combined_files[:max_count]
-
-            for file_paths in limited_combinations:
-                output_file_name = f"mix_{'_'.join([os.path.splitext(os.path.basename(f))[0] for f in file_paths])}.wav"
-                output_file_path = os.path.join(combined_class_dir, output_file_name)
-
-                mix_audio_files(file_paths, output_file_path, sample_rate)
-
-            print(f"Combinações salvas em: {combined_class_dir}")
-
 
 # ======================
 # Main Workflow
 # ======================
 
 def main():
-    version = "V4"
-    dataset_path = fr'/tools/mohand_postdoc/datasets/DeepShip/DeepShip_organized_V2'
-    save_dir = fr'/tools/mohand_postdoc/datasets/DeepShip/DeepShip_{version}_processed_features'
+    version = "V_5000"
+    dataset_path_train = fr'/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train_DeepShip_Segments_5000/'
+    dataset_path_test = fr'/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/test_DeepShip_Segments_3500/'
+    save_dir_train = fr'/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/trainDeepShip_{version}_processed_features'
+    save_dir_test = fr'/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/testDeepShip_{version}_processed_features'
     model_save_path = fr"/tools/mohand_postdoc/datasets/models/resnet18_model_{version}_.h5"
 
-    #create_mixed_classes(dataset_path)
+    # Charger les datasets train et test
+    print("Chargement des données d'entraînement...")
+    X_train_raw, y_train, class_to_index = load_dataset(dataset_path_train, save_dir=save_dir_train)
+    
+    print("Chargement des données de test...")
+    X_test_raw, y_test, _ = load_dataset(dataset_path_test, save_dir=save_dir_test)
 
+    # Réduction de dimensionnalité et visualisation (appliquée uniquement sur train)
+    print("Réduction de dimensionnalité sur les données d'entraînement...")
+    X_train_reduced, nca_model = reduce_and_visualize_with_nca(X_train_raw, y_train)
+    
+    # Appliquer la transformation NCA sur les données de test
+    num_samples_test = X_test_raw.shape[0]
+    num_features_test = np.prod(X_test_raw.shape[1:])
+    flattened_X_test = X_test_raw.reshape(num_samples_test, num_features_test)
+    X_test_reduced = nca_model.transform(flattened_X_test)
 
-    # Example audio and feature extraction
-    #example_audio_path = os.path.join(dataset_path, os.listdir(dataset_path)[0], os.listdir(os.path.join(dataset_path, os.listdir(dataset_path)[0]))[0])
-    #preprocess_audio(example_audio_path, show_example=True)
-    #extract_features(example_audio_path, show_example=True)
+    # Reshape des données pour le modèle
+    X_train = X_train_reduced.reshape(X_train_reduced.shape[0], 2, 1, 1)
+    X_test = X_test_reduced.reshape(X_test_reduced.shape[0], 2, 1, 1)
 
-    # Load dataset
-    X, y, class_to_index = load_dataset(dataset_path, save_dir=save_dir)
-
-    # Reduce dimensionality and visualize
-    X_reduced = reduce_and_visualize_with_nca(X, y)
-
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X_reduced, y, test_size=0.2, random_state=42)
-
-    X_train = X_train.reshape(X_train.shape[0], 2, 1, 1)
-    X_test = X_test.reshape(X_test.shape[0], 2, 1, 1)
-
-    # Build or load model
+    # Construire ou charger le modèle
     if os.path.exists(model_save_path):
-        print("Loading saved model...")
+        print("Chargement du modèle sauvegardé...")
         model = models.load_model(model_save_path)
     else:
-        print("Training the model...")
+        print("Entraînement du modèle...")
         model = build_resnet18(input_shape=X_train.shape[1:], num_classes=len(class_to_index))
         early_stopping = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
         lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
-        history = model.fit(X_train, y_train, epochs=100, batch_size=5, validation_data=(X_test, y_test), callbacks=[early_stopping, lr_scheduler])
+        
+        # Validation croisée sur les données d'entraînement
+        history = model.fit(
+            X_train,
+            y_train,
+            epochs=100,
+            batch_size=5,
+            validation_data=(X_test, y_test),
+            callbacks=[early_stopping, lr_scheduler]
+        )
+        
         model.save(model_save_path)
-        print(f"Model saved to {model_save_path}")
+        print(f"Modèle sauvegardé dans {model_save_path}")
 
-# Évaluation globale du modèle
+    # Évaluation globale du modèle sur le jeu de test
+    print("\nÉvaluation sur le jeu de test...")
     loss, accuracy = model.evaluate(X_test, y_test)
     print(f"Accuracy globale: {accuracy * 100:.2f}%")
 
     # 🔥 Ajout du calcul de l'accuracy par classe 🔥
     print("\n🔍 Calcul de l'accuracy par classe...")
-    
+
     # Prédictions sur le jeu de test
     y_pred = model.predict(X_test)
     y_pred_classes = np.argmax(y_pred, axis=1)  # Convertir les probabilités en indices de classes
     y_true_classes = y_test  # y_test contient déjà les indices des classes
-
 
     # Matrice de confusion
     conf_matrix = confusion_matrix(y_true_classes, y_pred_classes)

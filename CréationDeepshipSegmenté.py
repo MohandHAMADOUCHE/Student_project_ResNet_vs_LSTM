@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 
 # Chemin du dossier contenant les sous-dossiers des classes de navires
-base_path = "/tools/mohand_postdoc/datasets/DeepShip/DeepShip_organized_V2"
-output_path = "/tools/mohand_postdoc/datasets/DeepShip/DeepShip_SegmentsV1"
+base_path = "/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train"
+output_path = "/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train_DeepShip_Segments"
 
 
 # Classes de navires
@@ -75,7 +75,7 @@ df_results = pd.DataFrame.from_dict(segments_info, orient="index", columns=["Nom
 print(df_results)
 
 # Sauvegarde des résultats dans un fichier CSV
-df_results.to_csv("resultats_mini_datasetsegmenté.csv", index=True)
+df_results.to_csv(os.path.join(output_path, "resultats_mini_datasetsegmenté.csv"), index=True)
 
 print("\nLe mini-dataset a été créé dans le dossier 'mini_dataset'.")
 print("Les résultats ont été enregistrés dans 'resultats_mini_dataset.csv'.")
