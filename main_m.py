@@ -13,62 +13,90 @@ from concurrent.futures import ThreadPoolExecutor
 from gammatone.gtgram import gtgram
 from sklearn.metrics import confusion_matrix
 
-from audio_processing import extract_features, visualize_features, extract_features_v1
+from audio_processing import extract_features, visualize_features
 
 
 from sklearn.decomposition import IncrementalPCA
 from sklearn.neighbors import NeighborhoodComponentsAnalysis
 import numpy as np
 
-def reduce_and_visualize_with_nca(features, labels, threshold=0.3, chunk_size=1000):
-    """
-    Filters features based on their importance weights using NCA and a threshold, with block processing.
-    """
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.neighbors import NeighborhoodComponentsAnalysis
+
+def reduce_and_visualize_with_nca(features, labels, threshold=0.3, chunk_size=5000):
     print("Filtering features based on threshold using NCA...")
 
     num_samples, num_features, num_frames = features.shape
     print(f"Input shape: {features.shape}")
 
-    # Step 1: Subsample frames to reduce temporal dimension
-    subsampled_features = np.mean(features[:, :, ::4], axis=2)  # Reduce frames by averaging every 4 frames
-    print(f"Subsampled features shape: {subsampled_features.shape}")
-
-    # Step 2: Flatten the data for dimensionality reduction
-    flattened_features = subsampled_features.reshape(subsampled_features.shape[0], -1)
-    print(f"Flattened features shape: {flattened_features.shape}")
-
-    # Step 3: Apply Incremental PCA to reduce dimensionality further
-    ipca = IncrementalPCA(n_components=150)  # Reduce to a manageable number of dimensions
-    reduced_features = ipca.fit_transform(flattened_features)
-    print(f"Reduced features shape: {reduced_features.shape}")
+    # Reshape features to (num_samples * num_frames, num_features)
+    reshaped_features = features.reshape(-1, num_features)
+    print(f"Reshaped shape: {reshaped_features.shape}")
+    reshaped_labels = np.repeat(labels, num_frames)
+    print(f"Reshaped labels shape: {reshaped_labels.shape}")
 
     # Initialize variables for storing results
-    filtered_chunks = []
+    filtered_features = []
     nca = None
 
-    # Process the data in chunks with NCA
-    for i in range(0, reduced_features.shape[0], chunk_size):
+    # Process the data in chunks
+    for i in range(0, reshaped_features.shape[0], chunk_size):
         print(f"Processing block {i // chunk_size + 1}...")
         start = i
-        end = min(i + chunk_size, reduced_features.shape[0])
+        end = min(i + chunk_size, reshaped_features.shape[0])
         
-        chunk_features = reduced_features[start:end]
-        chunk_labels = labels[start:end]
+        chunk_features = reshaped_features[start:end]
+        chunk_labels = reshaped_labels[start:end]
 
         nca = NeighborhoodComponentsAnalysis(random_state=42)
+        
         try:
             nca.fit(chunk_features, chunk_labels)
         except MemoryError:
             print("MemoryError: Reduce the dataset size or optimize memory usage.")
             return None, None
 
+        # Debug: Visualize nca.components_
+        plt.figure(figsize=(12, 8))
+        plt.imshow(nca.components_, aspect='auto', cmap='viridis')
+        plt.colorbar()
+        plt.title(f"NCA Components (Block {i // chunk_size + 1})")
+        plt.xlabel("Feature Index")
+        plt.ylabel("Component Index")
+        plt.tight_layout()
+        plt.show()
+
+        # Extract feature weights
         feature_weights = np.linalg.norm(nca.components_, axis=0)
+
+        # Debug: Visualize feature weights
+        plt.figure(figsize=(10, 6))
+        plt.plot(range(len(feature_weights)), feature_weights, 'bo-')
+        plt.axhline(y=threshold, color='red', linestyle='--', label=f'Threshold = {threshold}')
+        plt.title(f"Feature Weights (Block {i // chunk_size + 1})")
+        plt.xlabel("Feature Index")
+        plt.ylabel("Weight")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+        # Screen features based on the threshold
         important_features_mask = feature_weights >= threshold
         filtered_chunk = chunk_features[:, important_features_mask]
 
-        filtered_chunks.append(filtered_chunk)
+        print(f"Block {i // chunk_size + 1}:")
+        print(f" - Number of features before filtering: {num_features}")
+        print(f" - Number of features after filtering: {filtered_chunk.shape[1]}")
 
-    final_filtered_features = np.vstack(filtered_chunks)
+        filtered_features.append(filtered_chunk)
+
+    # Combine all filtered chunks into a single array
+    final_filtered_features = np.vstack(filtered_features)
+
+    # Reshape back to (num_samples, num_filtered_features, num_frames)
+    num_filtered_features = final_filtered_features.shape[1]
+    final_filtered_features = final_filtered_features.reshape(num_samples, num_frames, num_filtered_features).transpose(0, 2, 1)
 
     return final_filtered_features, nca
 
@@ -86,20 +114,19 @@ def process_audio_file(args):
     Returns:
         tuple: A tuple containing the extracted features and class index.
     """
-    file_path, class_index, frame_length, hop_length, n_features, save_dir = args  
+    file_path, class_index, frame_length, hop_length, n_features, save_dir, show_example, show_shapes = args  
     save_path = None
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
         save_path = os.path.join(save_dir, os.path.basename(file_path) + '.npy')
-    
-    # Extract features from the audio file def extract_features(file_path, frame_length=2048, hop_length=512, n_features=13, save_path=None, show_example=None, show_shapes=None):
-    mgcl_delta_features = extract_features_v1(file_path=file_path, frame_length=frame_length, hop_length=hop_length, n_features=n_features, save_path=save_path, show_example=False, show_shapes=True)
-    print(file_path)
-    print(f"features shape: {mgcl_delta_features.shape}")
+   # print(f"n_features: {n_features}") ; exit
+    mgcl_delta_features = extract_features(file_path=file_path, frame_length=frame_length, hop_length=hop_length, n_features=n_features, save_path=save_path, show_example=show_example, show_shapes=show_shapes)
+   # print(file_path)
+    #  print(f"features shape: {mgcl_delta_features.shape}")
     return mgcl_delta_features, class_index
 
 # Function to load a dataset organized in subdirectories using ThreadPoolExecutor
-def load_dataset(dataset_path, frame_length=2048, hop_length=512, n_features=12, save_dir=None):
+def load_dataset(dataset_path, frame_length=2048, hop_length=512, n_features=12, save_dir=None, show_example=None, show_shapes=None):
     """
     Loads a dataset organized in subdirectories, processes the audio files in parallel, 
     and extracts their features.
@@ -126,7 +153,7 @@ def load_dataset(dataset_path, frame_length=2048, hop_length=512, n_features=12,
             for file_name in os.listdir(cls_path):  # List all files in the class folder
                 file_path = os.path.join(cls_path, file_name)
                 if file_name.endswith(('.wav', '.mp3')):  # Check if the file is an audio file
-                    tasks.append((file_path, class_to_index[cls_name], frame_length, hop_length, n_features, save_dir))
+                    tasks.append((file_path, class_to_index[cls_name], frame_length, hop_length, n_features, save_dir, show_example, show_shapes))
 
     # Process the files in parallel using ThreadPoolExecutor
     with ThreadPoolExecutor() as executor:
@@ -147,7 +174,7 @@ def main():
 
     # Charger les datasets train et test
     print("Chargement des données d'entraînement...")
-    X_train_raw, y_train, class_to_index = load_dataset(dataset_path_train, save_dir=save_dir_train)
+    X_train_raw, y_train, class_to_index = load_dataset(dataset_path_train, save_dir=save_dir_train, show_example=False, show_shapes=False)
     print(f"shape of X_train_raw: {X_train_raw.shape}")
     print(f"shape of y_train: {y_train.shape}")
     print(f"class_to_index: {class_to_index}")
