@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from gammatone.gtgram import gtgram
 from sklearn.metrics import confusion_matrix
 
-from audio_processing import extract_features, visualize_features
+from audio_processing import extract_features, visualize_features, visualize_features_ext
 
 
 from sklearn.decomposition import IncrementalPCA
@@ -101,7 +101,6 @@ def reduce_and_visualize_with_nca(features, labels, threshold=0.3, chunk_size=50
     return final_filtered_features, nca
 
 
-
 # Function to process a single audio file
 def process_audio_file(args):
     """
@@ -164,6 +163,9 @@ def load_dataset(dataset_path, frame_length=2048, hop_length=512, n_features=12,
 
     return np.array(X), np.array(y), class_to_index
 
+from sklearn.metrics.pairwise import cosine_similarity
+
+
 def main():
     version = "V_5000"
     dataset_path_train = fr'/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train_DeepShip_Segments_5000/'
@@ -172,20 +174,28 @@ def main():
     save_dir_test = fr'/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/testDeepShip_{version}_processed_features'
     model_save_path = fr"/tools/mohand_postdoc/datasets/models/resnet18_model_{version}_.h5"
 
-    # Charger les datasets train et test
+    # Charger les datasets train et test     
     print("Chargement des données d'entraînement...")
     X_train_raw, y_train, class_to_index = load_dataset(dataset_path_train, save_dir=save_dir_train, show_example=False, show_shapes=False)
     print(f"shape of X_train_raw: {X_train_raw.shape}")
     print(f"shape of y_train: {y_train.shape}")
     print(f"class_to_index: {class_to_index}")
-    
+     
     print("Chargement des données de test...")
     X_test_raw, y_test, _ = load_dataset(dataset_path_test, save_dir=save_dir_test)
-    print(X_train_raw[1].shape)
-    visualize_features(X_train_raw[1] , 32000)
+    print("X_train_raw[1].shape", X_train_raw[1].shape)
+    visualize_features_ext(X_train_raw[1000] , 32000)
     # Réduction de dimensionnalité et visualisation (appliquée uniquement sur train)
+
+    print("calcul de la matrice de similarité")
+    X_flat = X_train_raw.reshape(20000, -1) 
+    print("shape de X",X_flat.shape)
+    similarity_matrix = cosine_similarity(X_flat)
+    np.save('cosine_similarity_matrix.npy', similarity_matrix)
+
+
     print("Réduction de dimensionnalité sur les données d'entraînement...")
-    X_train_reduced, nca_model = reduce_and_visualize_with_nca(X_train_raw, y_train)
+    # X_train_reduced, nca_model = reduce_and_visualize_with_nca(X_train_raw, y_train)
     
     # Appliquer la transformation NCA sur les données de test
     num_samples_test = X_test_raw.shape[0]

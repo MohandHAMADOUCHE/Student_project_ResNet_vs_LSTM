@@ -63,9 +63,10 @@ if __name__ == "__main__":
         exit()
     else:
         # Remplacez par le chemin de votre fichier audio
-        # file_path = "/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train_DeepShip_Segments_5000/Cargo/99_segment_3060.wav"
+        # 
+        file_path = "/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/train_DeepShip_Segments_5000/Cargo/99_segment_3060.wav"
         #  file_path = "/tools/mohand_postdoc/datasets/DeepShip/ClassesrandomlySplitted/test_DeepShip_Segments_3500/Tug/020446_segment_1088.wav"
-        file_path = "5084.220822235505.flac"
+        #  file_path = "5084.220822235505.flac"
         if not os.path.exists(file_path):
             print("Fichier audio introuvable.")
             exit()

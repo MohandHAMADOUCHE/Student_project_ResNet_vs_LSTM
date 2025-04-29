@@ -368,3 +368,137 @@ def visualize_features(features, sample_rate=32000):
 
     # Afficher toutes les figures
     plt.show()
+
+
+def visualize_features_ext(combined_features, sample_rate=32000):
+    """
+    Visualizes individual and fused audio features from a single matrix.
+
+    Args:
+        features_matrix (numpy.ndarray): Matrix of shape (270, 188) containing all features.
+        sample_rate (int): Sample rate of the audio.
+    """
+    print("combined_features.shape", combined_features.shape)
+    # Extraction des caractéristiques individuelles
+    if combined_features.shape != (270, 188):
+        print(f"La forme de combined_features est incorrecte. Attendu: (270, 188), Reçu: {combined_features.shape}")
+        return
+
+    # Extraction des caractéristiques individuelles
+    mfcc = combined_features[:12]
+    gfcc = combined_features[12:43]
+    cqt = combined_features[43:84]
+    lofar = combined_features[84:135]
+    mgcl = combined_features[:135]  # Les 135 premières lignes
+    
+    delta_mfcc = combined_features[135:147]  # 12 lignes après mgcl
+    delta_gfcc = combined_features[147:178]  # 31 lignes après delta_mfcc
+    delta_cqt = combined_features[178:219]   # 41 lignes après delta_gfcc
+    delta_lofar = combined_features[219:270] # 51 lignes restantes
+    delta_mgcl = combined_features[135:]     # Toutes les lignes après mgcl
+
+    # Création d'un dictionnaire avec les caractéristiques extraites
+    features = {
+        "MFCC": mfcc, "Delta-MFCC": delta_mfcc,
+        "GFCC": gfcc, "Delta-GFCC": delta_gfcc,
+        "CQT": cqt, "Delta-CQT": delta_cqt,
+        "LOFAR": lofar, "Delta-LOFAR": delta_lofar,
+        "MGCL": mgcl, "Delta-MGCL": delta_mgcl
+    }
+
+    # Liste des couples de caractéristiques à afficher
+    pairs = [
+        ("MFCC", "Delta-MFCC"),
+        ("GFCC", "Delta-GFCC"),
+        ("CQT", "Delta-CQT"),
+        ("LOFAR", "Delta-LOFAR"),
+        ("MGCL", "Delta-MGCL")
+    ]
+
+    for feature1, feature2 in pairs:
+        if feature1 in features and feature2 in features:
+            fig, axes = plt.subplots(1, 2, figsize=(12, 4), sharex=True)
+
+            # Afficher la première caractéristique (e.g., MFCC)
+            if feature1 == "MFCC":
+                img1 = librosa.display.specshow(features[feature1], sr=sample_rate, x_axis='time', cmap='viridis', ax=axes[0])
+                axes[0].set_title(feature1)
+                axes[0].set_ylabel("Channel Index")
+                axes[0].set_yticks(np.arange(1, features[feature1].shape[0] + 1))
+                axes[0].set_ylim(0.5, features[feature1].shape[0] - 0.5)
+            elif feature1 == "GFCC":
+                img1 = librosa.display.specshow(features[feature1], sr=sample_rate, x_axis='time', cmap='viridis', ax=axes[0])
+                axes[0].set_title(feature1)
+                axes[0].set_ylabel("Channel Index")
+                axes[0].set_yticks(np.arange(0, 31, step=5))
+            elif feature1 == "CQT":
+                img1 = librosa.display.specshow(librosa.amplitude_to_db(np.abs(features[feature1]), ref=np.max),
+                                                sr=sample_rate, x_axis='time', y_axis='hz', cmap='viridis', ax=axes[0])
+                axes[0].set_title(feature1)
+                axes[0].set_ylabel("Frequency (Hz)")
+            elif feature1 == "LOFAR":
+                img1 = librosa.display.specshow(librosa.amplitude_to_db(np.abs(features[feature1]), ref=np.max),
+                                                sr=sample_rate, x_axis='time', y_axis='hz', cmap='viridis', ax=axes[0])
+                axes[0].set_title(feature1)
+                axes[0].set_ylabel("Frequency (Hz)")
+            elif feature1 == "MGCL":
+                img1 = librosa.display.specshow(features[feature1], sr=sample_rate, x_axis='time', cmap='viridis', ax=axes[0])
+                axes[0].set_title(feature1)
+                axes[0].set_yticks(np.arange(0, 135, step=20))
+                axes[0].set_ylabel("Channel Index")
+
+            fig.colorbar(img1, ax=axes[0], format='%+2.0f dB')
+
+            # Afficher la deuxième caractéristique (e.g., Delta-MFCC)
+            img2 = librosa.display.specshow(features[feature2], sr=sample_rate, x_axis='time', cmap='viridis', ax=axes[1])
+            axes[1].set_title(feature2)
+
+            # Configurer les mêmes ticks pour les Delta
+            if feature2 == "Delta-MFCC":
+                axes[1].set_ylabel("Channel Index")
+                axes[1].set_yticks(np.arange(1, features[feature2].shape[0] + 1))
+                axes[1].set_ylim(0.5, features[feature2].shape[0] - 0.5)
+            elif feature2 == "Delta-GFCC":
+                axes[1].set_ylabel("Channel Index")
+                axes[1].set_yticks(np.arange(0, 31, step=5))
+            elif feature2 == "Delta-CQT":
+                axes[1].set_ylabel("Frequency (Hz)")
+                axes[1].set_yticks(np.arange(1, features[feature2].shape[0] + 1, step=5))
+            elif feature2 == "Delta-LOFAR":
+                axes[1].set_ylabel("Frequency (Hz)")
+                axes[1].set_yticks(np.arange(1, features[feature2].shape[0] + 1, step=5))
+
+            elif feature2 == "Delta-MGCL":
+                axes[1].set_yticks(np.arange(0, 135, step=20))
+                axes[1].set_ylabel("Channel Index")
+
+            fig.colorbar(img2, ax=axes[1], format='%+2.0f dB')
+
+            # Ajouter des labels communs
+            for ax in axes:
+                ax.set_xlabel("Time (s)")
+
+            # Ajuster l'espacement entre les sous-graphiques
+            plt.tight_layout()
+
+
+    # Ajouter une figure pour mgcl_delta_features
+    if "mgcl_delta_features" in features:
+        plt.figure(figsize=(10, 6))
+        img = librosa.display.specshow(features["mgcl_delta_features"], sr=sample_rate, x_axis='time', cmap='viridis')
+        plt.colorbar(img, format='%+2.0f dB')
+        plt.title("MGCL + Delta Features")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Channel Index")
+        plt.yticks(np.arange(0, 270, step=20))
+        plt.tight_layout()
+
+    # Ajouter une fenêtre avec un bouton pour fermer toutes les figures
+    button_fig = plt.figure(figsize=(6, 2))
+    ax_button = button_fig.add_axes([0.4, 0.4, 0.2, 0.4])  # Position et taille du bouton
+    button = Button(ax_button, 'Close All')  # Créer le bouton
+    button.on_clicked(close_all_figures)  # Associer la fonction de callback au clic
+
+    # Afficher toutes les figures
+    plt.show()
+
