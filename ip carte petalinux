@@ -1,0 +1,7 @@
+ip a add 172.19.28.76/24 dev eth0
+
+ip route add default via 172.19.28.18
+
+vi /etc/resolv.conf 
+nameserver 195.83.247.29
+nameserver 195.83.247.21
